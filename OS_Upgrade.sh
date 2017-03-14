@@ -104,7 +104,7 @@ icloud_icon="/System/Library/PrivateFrameworks/CloudDocsDaemon.framework/Version
 # Variables that you should edit.
 # You can supply an email address or contact number for your end users to contact you. This will appear in JAMF Helper dialogs.
 # If left blank, it will default to just "IT" which may not be as helpful to your end users.
-it_contact="IT@simonsfoundation.org"
+it_contact="IT@contoso.com"
 
 if [[ -z "$it_contact" ]]; then
     it_contact="IT"
