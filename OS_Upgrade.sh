@@ -1,4 +1,4 @@
-#!/bin/bash -x
+#!/bin/bash
 
 # Written by: Balmes Pavlov
 # 3/14/17
