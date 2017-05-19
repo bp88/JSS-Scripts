@@ -38,7 +38,7 @@ fi
 
 message="${7}
 
-This update may take up to 20 minutes, but if you're on a slower connection it can take substantially longer. If it takes longer than expected, please contact: IT@simonsfoundation.org.
+This update may take up to 20 minutes, but if you're on a slower connection it can take substantially longer. If it takes longer than expected, please contact: $it_contact.
 
 START TIME: $(/bin/date)"
 
