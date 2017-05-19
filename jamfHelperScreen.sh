@@ -4,8 +4,10 @@
 # Written by Balmes Pavlov
 #
 # This script is intended to be used with Jamf Pro.
-# The purpose of this script is to load the JAMFHelper dialog in Fullscreen mode when a policy runs.
+# The purpose of this script is to load the JAMFHelper dialog in when a policy runs.
 # Parameters will be used to determine the Window Type, Header, Description, Icon, and Button Text. They are described in full detail below.
+# The JAMFHelper has many more functions beyond what's used in this script. This script was intended to cover the features I'd most likely use
+# while making it flexible enough to use in multiple policies.
 # 
 # Parameters:
 # Required: $4 is the window type used by JamfHelper. There are only three possible values: fs, hud, and utility. Note: All these window types can be exited using CMD + Q.
