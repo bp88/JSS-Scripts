@@ -59,10 +59,10 @@ display_message (){
         if [[ -n "$3" ]] && [[ -n "$4" ]]; then
             if [[ -z "$5" ]]; then
                 "$jamfHelper" -windowType "$1" -title "$2" -heading "$3" -description "$4" & /bin/echo $! > "$path_to_jhpid"
-                killJHPID
+                exit
             elif [[ -n "$5" ]]; then
                 "$jamfHelper" -windowType "$1" -title "$2" -heading "$3" -description "$4" -icon "$5" & /bin/echo $! > "$path_to_jhpid"
-                killJHPID
+                exit
             fi
         elif [[ -z "$2" ]] || [[ -z "$3" ]] || [[ -z "$4" ]]; then
             /bin//bin/echo "You are missing a parameter in the JSS. Please make sure to fill in all JSS parameters."
@@ -72,28 +72,21 @@ display_message (){
         if [[ -n "$2" ]] && [[ -n "$3" ]] && [[ -n "$4" ]]; then
             if [[ -z "$5" ]] && [[ -n "$6" ]]; then
                 "$jamfHelper" -windowType "$1" -title "$2" -heading "$3" -description "$4" -button1 "$6" -defaultButton 1 & /bin/echo $! > "$path_to_jhpid"
-                killJHPID
+                exit
             elif [[ -z "$5" ]] && [[ -z "$6" ]]; then
                 "$jamfHelper" -windowType "$1" -title "$2" -heading "$3" -description "$4" & /bin/echo $! > "$path_to_jhpid"
-                killJHPID
+                exit
             elif [[ -n "$5" ]] && [[ -z "$6" ]]; then
                 "$jamfHelper" -windowType "$1" -title "$2" -heading "$3" -description "$4" -icon "$5" & /bin/echo $! > "$path_to_jhpid"
-                killJHPID
+                exit
             elif [[ -n "$5" ]] && [[ -n "$6" ]]; then
                 "$jamfHelper" -windowType "$1" -title "$2" -heading "$3" -description "$4" -icon "$5" -button1 "$6" -defaultButton 1 & /bin/echo $! > "$path_to_jhpid"
-                killJHPID
+                exit
             fi
         fi
     fi
     
     shopt -u nocasematch
-}
-
-killJHPID (){
-    jhpid="$(/bin/cat $path_to_jhpid)"
-    sleep 3
-    /bin/kill "$jhpid"
-    exit
 }
 
 display_message "$window_type" "$title" "$header" "$message" "$icon" "$button_one"
