@@ -6,6 +6,8 @@
 # 3/28/17 Edit: Updated for 10.12.4 compatibility. Added an additional exit codes and modified script to take into account which startosinstall command
 # to use as Apple has modified the options in 10.12.4. Also added functions to reduce code re-use.
 #
+# 9/26/17 Edit: Updated for 10.13 compatibility. Cleaned up additional code logic. Added FV2 authenticated restart.
+#
 # This script is meant to be used with Jamf Pro.
 # It will make sure of the macOS Sierra installer app along with some JSS script parameters and is intended to be somewhat easy to modify if used with future OS deployments.
 #
@@ -51,6 +53,12 @@
 # 11: Insufficient free space on computer.
 # 12: Function parameter not supplied.
 # 13: Could not determine the OS version in the macOS app installer. It's possible that in a future OS version that Apple may change their app installer and this script would need to be re-modified.
+# 14: Remote users are logged into computer. Not secure when using FV2 Authenticated Restart.
+# 15: FV2 Authenticated Restart is only supported on 10.9 and higher.
+# 16: FV2 Status is not Encrypted.
+# 17: Logged in user is not on the list of the FileVault enabled users.
+# 18: Password mismatch. User may have forgotten their password.
+# 19: FileVault authenticated
 
 # Variables to determine paths, OS version, disk space, and power connection. Do not edit.
 available_free_space=$(/bin/df -g / | /usr/bin/tail -1 | /usr/bin/awk '{print $4}')
@@ -71,21 +79,9 @@ min_req_os_min="$(/bin/echo "$min_req_os" | /usr/bin/cut -d . -f 3)"
 icloud_check="${9}"
 mac_os_installer_path="${10}"
 #mac_os_install_ver="$(/usr/bin/defaults read "$mac_os_installer_path"/Contents/Info.plist CFBundleShortVersionString)"
-#mac_os_install_ver="$(/usr/libexec/PlistBuddy -c "print :'System Image Info':version" "$mac_os_installer_path"/Contents/SharedSupport/InstallInfo.plist)"
+base_os_ver="$(/usr/libexec/PlistBuddy -c "print :'System Image Info':version" "$mac_os_installer_path"/Contents/SharedSupport/InstallInfo.plist)"
 min_os_app_ver="${11}"
-
-# Testing: JSS Parameters
-# If using these, please be sure to comment out the JSS parameters before this section
-##needed_free_space="5"
-##app_name="macOS Sierra"
-##time="60"
-##custom_trigger_policy_name="os1012upgrade"
-##min_req_os="10.7.5"
-##min_req_os_maj="$(/bin/echo "$min_req_os" | /usr/bin/cut -d . -f 2)"
-##min_req_os_min="$(/bin/echo "$min_req_os" | /usr/bin/cut -d . -f 3)"
-##icloud_check="yes"
-##mac_os_installer_path="/Applications/Install macOS Sierra.app"
-##min_os_app_ver="10.11.5"
+base_os_maj="$(/bin/echo "$base_os_ver" | /usr/bin/cut -d . -f 2)"
 
 # Path to various icons used with JAMF Helper
 # Feel free to adjust these icon paths
@@ -94,6 +90,7 @@ downloadicon="/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/G
 driveicon="/System/Library/PreferencePanes/StartupDisk.prefPane/Contents/Resources/StartupDiskPref.icns"
 lowbatteryicon="/System/Library/CoreServices/Menu Extras/Battery.menu/Contents/Resources/LowBattery.icns"
 alerticon="/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/AlertCautionIcon.icns"
+filevaulticon="/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/FileVaultIcon.icns"
 
 # iCloud icons may not be available on OS prior to 10.10.
 # White iCloud icon
@@ -116,7 +113,7 @@ if [[ -z "$it_contact" ]]; then
 fi
 
 insufficient_free_space_for_install_dialog="Your boot drive must have $needed_free_space gigabytes of free space available in order to install $app_name. It currently has $available_free_space gigabytes free. Please free up space and try again. If you need assistance, please contact $it_contact."
-adequate_free_space_for_install_dialog="$app_name is currently downloading which may take up to 20 minutes. The installation process will begin once the download is complete. Please close all applications."
+adequate_free_space_for_install_dialog="$app_name is currently downloading. The installation process will begin once the download is complete. Please close all applications."
 no_ac_power="The computer is not plugged into a power source. Please plug it into a power source and start the installation again."
 inprogress="The upgrade to $app_name is now in progress.  Quit all your applications. The computer will restart automatically and you will be prompted to enter your username and password. Once you have authenticated, you can step away for about $time minutes. Do not shutdown or unplug from power during this process."
 disable_icloud="iCloud Drive enabled on this computer and the installation cannot continue. Please disable it by going to the Apple menu > System Preferences > iCloud and unchecking iCloud Drive. Once it’s disabled, please start the installation again. You can re-enable iCloud Drive after the upgrade is completed. If you need assistance, please contact $it_contact."
@@ -124,6 +121,9 @@ download_error="The download of macOS has failed. Installation will not proceed.
 upgrade_error="The installation of macOS has failed. Please contact $it_contact."
 bad_os="This version of macOS cannot be upgraded from the current operating system you are running. Please contact $it_contact."
 generic_error="An unexpected error has occurred. Please contact $it_contact."
+already_upgraded="Your computer is already upgraded to $app_name. If there is a problem or you have questions, please contact $it_contact."
+forgot_password="You made too many incorrect password attempts. Please contact $it_contact."
+fv_error="An unexpected error with Filevault has occurred. Please contact $it_contact."
 
 # Function that ensures required variables have been set
 # These are variables that if left unset will break the script and/or result in weird dialog messages.
@@ -144,7 +144,7 @@ checkParam "$mac_os_installer_path" "mac_os_installer_path"
 # Check for unsupported OS if a minimum required OS value has been provided. Note: macOS Sierra requires OS 10.7.5 or higher.
 # Also confirm that we are dealing with a valid OS version which is in the form of 10.12.4
 if [[ -n "$min_req_os" ]]; then
-    if [[ "$min_req_os" =~ ^[0-9]+[\.]+[0-9]+[\.]+[0-9]+$ ]]; then
+    if [[ "$min_req_os" =~ ^[0-9]+[\.]{1}[0-9]+[\.]{0,1}[0-9]*$ ]]; then
         if [[ "$os_major_ver" -lt "$min_req_os_maj" ]]; then
             /bin/echo "Unsupported Operating System. Cannot upgrade 10.$os_major_ver.$os_minor_ver to $min_req_os"
             "$jamfHelper" -windowType utility -icon "$alerticon" -heading "Unsupported OS" -description "$bad_os" -button1 "Exit" -defaultButton 1
@@ -182,72 +182,134 @@ print LV(sys.argv[1]) >= LV(sys.argv[2])
 EOF
 }
 
-# Function that determines the OS version from the macOS installer app
-# Requires parameter $1 which is the macOS app installer path.
-determineOSVersionFromInstallerApp (){
-    # Note: We will be mounting and unmounting disk images. Failure to mount isn't necessarily going to stop the script.
-    # Failure to unmount also won't stop the script as it would just get unmounted upon restart.
-    
-    # Check if function parameter was supplied
-    if [[ -z "$1" ]]; then
-        /bin/echo "Provide function parameter $1 which is the macOS app installer path."
-        "$jamfHelper" -windowType utility -icon "$alerticon" -heading "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
-        exit 12
-    fi 
-    
-    # Mount the macOS installer disk image
-    /usr/bin/hdiutil attach -nobrowse "$1"/Contents/SharedSupport/InstallESD.dmg
-    
-    # Determine whether mount was successful
-    if [[ "$?" != 0 ]]; then
-        /bin/echo "Failed to mount."
-        "$jamfHelper" -windowType utility -icon "$alerticon" -heading "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
-        exit 10
-    else
-        # Mount the Base System disk image containing the OS version
-        /usr/bin/hdiutil attach -nobrowse "/Volumes/OS X Install ESD/BaseSystem.dmg"
-        
-        if [[ "$?" != 0 ]]; then
-            /bin/echo "Failed to mount."
-            "$jamfHelper" -windowType utility -icon "$alerticon" -heading "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
-            exit 10
-        else
-            base_os_ver="$(/usr/bin/defaults read "/Volumes/OS X Base System/System/Library/CoreServices/SystemVersion.plist" ProductVersion)"
-            if [[ -z "$base_os_ver" ]]; then
-                /bin/echo "Could not determine the macOS version in the macOS app installer."
-                "$jamfHelper" -windowType utility -icon "$alerticon" -heading "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
-                exit 13
-            fi
-        fi
-    fi
-    
-    # Unmount Base OS disk image
-    /usr/bin/hdiutil detach -force "/Volumes/OS X Base System/"
-    
-    # Determine whether unmount was successful. Not necessarily a problem since a restart will an unmount which is why we're turning a code 0
-    if [[ "$?" != 0 ]]; then
-        /bin/echo "Failed to unmount."
-        return 0
-    else
-        # Unmount the macOS installer disk image
-        /usr/bin/hdiutil detach -force "/Volumes/OS X Install ESD/"
-        
-        if [[ "$?" != 0 ]]; then
-            /bin/echo "Failed to unmount."
-            return 0
-        fi
-    fi
-}
+# Function to initiate prompt for FileVault Authenticated Restart
+# Based off code from Elliot Jordan's script: https://github.com/homebysix/jss-filevault-reissue/blob/master/reissue_filevault_recovery_key.sh
+fvAuthRestart (){
 
-# If all checks and version comparison is working, initiate upgrade
-if [[ $? = 0 ]] || [[ $? = 1 ]]; then
-    /bin/echo "Proceeding with installation."
-else
-    "$jamfHelper" -windowType utility -icon "$alerticon" -heading "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
-    exit 8
+# Check for remote users.
+REMOTE_USERS=$(who | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | wc -l)
+if [[ $REMOTE_USERS -gt 0 ]]; then
+    /bin/echo "Remote users are logged in. Cannot complete."
+    "$jamfHelper" -windowType utility -icon "$filevaulticon" -heading "FileVault Error" -description "$fv_error" -button1 "Exit" -defaultButton 1 &
+    exit 14
 fi
 
+# Convert POSIX path of logo icon to Mac path for AppleScript
+filevaulticon="$(/usr/bin/osascript -e 'tell application "System Events" to return POSIX file "'"$filevaulticon"'" as text')"
 
+# Most of the code below is based on the JAMF reissueKey.sh script:
+# https://github.com/JAMFSupport/FileVault2_Scripts/blob/master/reissueKey.sh
+
+# Check the OS version as FV2 authrestart was introduced in 10.8.3.
+# However, we are expecting OS 10.9 or higher.
+if [[ "$os_major_ver" -lt 8 && "$os_minor_ver" -lt 3 ]]; then
+    /bin/echo "OS version does not support FV2 authenticated restart."
+    "$jamfHelper" -windowType utility -icon "$filevaulticon" -heading "FileVault Error" -description "$fv_error" -button1 "Exit" -defaultButton 1 &
+    exit 15
+fi
+
+# Check to see if the encryption process is complete
+FV_STATUS="$(/usr/bin/fdesetup status)"
+if grep -q "Encryption in progress" <<< "$FV_STATUS"; then
+    /bin/echo "The encryption process is still in progress. Cannot do FV2 authenticated restart."
+    /bin/echo "$FV_STATUS"
+    "$jamfHelper" -windowType utility -icon "$filevaulticon" -heading "FileVault Error" -description "$fv_error" -button1 "Exit" -defaultButton 1 &
+    exit 16
+elif grep -q "FileVault is Off" <<< "$FV_STATUS"; then
+    /bin/echo "Encryption is not active. Cannot do FV2 authenticated restart."
+    /bin/echo "$FV_STATUS"
+    "$jamfHelper" -windowType utility -icon "$filevaulticon" -heading "FileVault Error" -description "$fv_error" -button1 "Exit" -defaultButton 1 &
+    exit 16
+elif ! grep -q "FileVault is On" <<< "$FV_STATUS"; then
+    /bin/echo "Unable to determine encryption status. Cannot do FV2 authenticated restart."
+    /bin/echo "$FV_STATUS"
+    "$jamfHelper" -windowType utility -icon "$filevaulticon" -heading "FileVault Error" -description "$fv_error" -button1 "Exit" -defaultButton 1 &
+    exit 16
+fi
+
+# Get the logged in user's name
+logged_in_user="$(/usr/bin/python -c 'from SystemConfiguration import SCDynamicStoreCopyConsoleUser; import sys; username = (SCDynamicStoreCopyConsoleUser(None, None, None) or [None])[0]; username = [username,""][username in [u"loginwindow", None, u""]]; sys.stdout.write(username + "\n");')"
+
+# This first user check sees if the logged in account is already authorized with FileVault 2
+fv_users="$(/usr/bin/fdesetup list)"
+if ! egrep -q "^${logged_in_user}," <<< "$fv_users"; then
+    /bin/echo "$logged_in_user is not on the list of FileVault enabled users:"
+    /bin/echo "$fv_users"
+    "$jamfHelper" -windowType utility -icon "$filevaulticon" -heading "Error" -description "$fv_error" -button1 "Exit" -defaultButton 1 &
+    exit 17
+fi
+
+################################ MAIN PROCESS #################################
+
+# Get information necessary to display messages in the current user's context.
+user_id=$(id -u "$logged_in_user")
+if [[ "$os_major_ver" -le 9 ]]; then
+    l_id=$(pgrep -x -u "$user_id" loginwindow)
+    l_method="bsexec"
+elif [[ "$os_major_ver" -gt 9 ]]; then
+    l_id=$user_id
+    l_method="asuser"
+fi
+
+# Get the logged in user's password via a prompt.
+/bin/echo "Prompting $logged_in_user for their Mac password..."
+user_pw="$(/bin/launchctl "$l_method" "$l_id" /usr/bin/osascript -e 'display dialog "Please enter the password you use to log in to your Mac:" default answer "" with title "FileVault Authentication Restart" giving up after 86400 with text buttons {"OK"} default button 1 with hidden answer with icon file "'"${filevaulticon//\"/\\\"}"'"' -e 'return text returned of result')"
+
+# Thanks to James Barclay (@futureimperfect) for this password validation loop.
+TRY=1
+until /usr/bin/dscl /Search -authonly "$logged_in_user" "$user_pw" &>/dev/null; do
+    (( TRY++ ))
+    /bin/echo "Prompting $logged_in_user for their Mac password (attempt $TRY)..."
+    user_pw="$(/bin/launchctl "$l_method" "$l_id" /usr/bin/osascript -e 'display dialog "Sorry, that password was incorrect. Please try again:" default answer "" with title "FileVault Authentication Restart" giving up after 86400 with text buttons {"OK"} default button 1 with hidden answer with icon file "'"${filevaulticon//\"/\\\"}"'"' -e 'return text returned of result')"
+    if (( TRY >= 5 )); then
+        /bin/echo "Password prompt unsuccessful after 5 attempts."
+        "$jamfHelper" -windowType utility -icon "$filevaulticon" -heading "FileVault Authentication Error" -description "$forgot_password" -button1 "Exit" -defaultButton 1 &
+        exit 18
+    fi
+done
+/bin/echo "Successfully prompted for Filevault password."
+
+# Translate XML reserved characters to XML friendly representations.
+user_pw=${user_pw//&/&amp;}
+user_pw=${user_pw//</&lt;}
+user_pw=${user_pw//>/&gt;}
+user_pw=${user_pw//\"/&quot;}
+user_pw=${user_pw//\'/&apos;}
+
+/bin/echo "Setting up authenticated restart..."
+FDESETUP_OUTPUT="$(/usr/bin/fdesetup authrestart -delayminutes -1 -verbose -inputplist << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Username</key>
+    <string>$logged_in_user</string>
+    <key>Password</key>
+    <string>$user_pw</string>
+</dict>
+</plist>
+EOF
+)"
+
+# Test success conditions.
+FDESETUP_RESULT=$?
+
+# Clear password variable.
+unset user_pw
+
+if [[ $FDESETUP_RESULT -ne 0 ]]; then
+    /bin/echo "$FDESETUP_OUTPUT"
+    /bin/echo "[WARNING] fdesetup exited with return code: $FDESETUP_RESULT."
+    /bin/echo "See this page for a list of fdesetup exit codes and their meaning:"
+    /bin/echo "https://developer.apple.com/legacy/library/documentation/Darwin/Reference/ManPages/man8/fdesetup.8.html"
+    exit 19
+else
+    /bin/echo "$FDESETUP_OUTPUT"
+    /bin/echo "Computer will do a FileVault 2 authenticated restart."
+fi
+
+return 0
+}
 
 # Function to download macOS installer
 downloadOSInstaller (){
@@ -261,6 +323,8 @@ downloadOSInstaller (){
     else
         /bin/echo "Warning: Custom Trigger field to download macOS installer is empty. Cannot download macOS installer. Please ensure macOS installer app is already installed on the client."
     fi
+    
+    return 0
 }
 
 # Function to check macOS installer app has been installed and if not re-download and do a comparison check between OS installer app version required
@@ -271,7 +335,7 @@ checkOSInstaller (){
         /bin/rm -rf "/Library/Application Support/JAMF/Downloads/"
         /bin/rm -rf "/Library/Application Support/JAMF/Waiting Room/"
         
-        downloadOSInstaller
+            downloadOSInstaller
         
         # Final check to see if macOS installer app is on computer
         if [[ ! -e "$mac_os_installer_path/Contents/SharedSupport/InstallESD.dmg" ]] || [[ ! -e "$mac_os_installer_path/Contents/Resources/startosinstall" ]]; then
@@ -384,15 +448,28 @@ fi
 minOSReqCheck (){
     # Check to see if minimum required app installer's OS version has been supplied
     if [[ -n "$min_os_app_ver" ]]; then
-        if [[ "$min_os_app_ver" =~ ^[0-9]+[\.]+[0-9]+[\.]+[0-9]+$ ]]; then
-        
+        if [[ "$min_os_app_ver" =~ ^[0-9]+[\.]{1}[0-9]+[\.]{0,1}[0-9]*$ ]]; then
+            
             CompareResult="$(compareLooseVersion "$base_os_ver" "$min_os_app_ver")"
-        
+            
             if [[ "$CompareResult" = "False" ]]; then
+                /bin/echo "Minimum required macOS installer app version is greater than the version of the macOS installer on the client."
+                /bin/echo "Attempting to download the latest macOS installer."
+                    downloadOSInstaller
+                
+                if [[ "$?" = 0 ]]; then
+                    CompareResult="$(compareLooseVersion "$base_os_ver" "$min_os_app_ver")"
+                    
+                    if [[ "$CompareResult" = "False" ]]; then
+                            /bin/echo "Looks like the download attempt failed."
+                            /bin/echo "Minimum required macOS installer app version is still greater than the version on the client."
+                            /bin/echo "Please install the macOS installer app version that meets the minimum requirement set."
+                            "$jamfHelper" -windowType utility -icon "$alerticon" -heading "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+                            exit 8
+                    fi
+                fi
+            elif [[ "$CompareResult" = "True" ]]; then
                 /bin/echo "Minimum required macOS installer app version is greater than the version on the client."
-                /bin/echo "Please install the macOS installer app version that meets the minimum requirement set."
-                "$jamfHelper" -windowType utility -icon "$alerticon" -heading "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
-                exit 8
             fi
         else
             /bin/echo "Invalid Minimum OS version value."
@@ -410,37 +487,42 @@ minOSReqCheck (){
 # Function that determines what OS is on the macOS installer.app so that the appropriate startosinstall options are used as Apple has changed it with 10.12.4
 # Supply a parameter $1 for this function that includes the macOS app installer you are using to upgrade.
 installCommand (){
-
-    # Check if function parameter was supplied
-    if [[ -z "$1" ]]; then
-        /bin/echo "Provide function parameter $1 which is the macOS app install version."
-        "$jamfHelper" -windowType utility -icon "$alerticon" -heading "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
-        exit 12
-    fi 
-    
-    CompareResult="$(compareLooseVersion "$base_os_ver" "$1")"
+   
+    CompareResult="$(compareLooseVersion "$base_os_ver" 10.12.4)"
     
     # The startosinstall tool has been updated in 10.12.4 to remove --volume the flag
     if [[ "$CompareResult" = "True" ]]; then
-        /bin/echo "The OS version in the macOS installer app version is greater than or equal to 10.12.4."
-        
-        # Initiate the macOS Seirra silent install
-        # 30 second delay should give the jamf binary enough time to upload policy results to JSS
-        "$mac_os_installer_path/Contents/Resources/startosinstall" --applicationpath "$mac_os_installer_path" --rebootdelay 30 --nointeraction &
 
+        if [[ $base_os_maj -ge 13 ]]; then
+            /bin/echo "The OS version in the macOS installer app version is greater than 10.13. Running appropriate startosinstall command to initiate install."
+            # Initiate the macOS High Sierra silent install
+            # 30 second delay should give the jamf binary enough time to upload policy results to JSS
+            # Left this the same as the previous command in case you want to force upgrades to do APFS. Modify the next line by adding: --converttoapfs YES
+            # If Apple's installer does not upgrade the Mac to APFS, assume something about your Mac does not pass the "upgrade to APFS" logic.
+            "$mac_os_installer_path/Contents/Resources/startosinstall" --applicationpath "$mac_os_installer_path" --rebootdelay 30 --nointeraction &
+        else
+            /bin/echo "The OS version in the macOS installer app version is greater than 10.12.4 but lower than 10.13. Running appropriate startosinstall command to initiate install."
+            # Initiate the macOS Sierra silent install (this will also work for High Sierra)
+            # 30 second delay should give the jamf binary enough time to upload policy results to JSS
+            "$mac_os_installer_path/Contents/Resources/startosinstall" --applicationpath "$mac_os_installer_path" --rebootdelay 30 --nointeraction &
+        fi
     elif [[ "$CompareResult" = "False" ]]; then
-        /bin/echo "The OS version in the macOS installer app version is less than 10.12.4."
+        /bin/echo "The OS version in the macOS installer app version is less than 10.12.4. Running appropriate startosinstall command to initiate install."
         
         # Initiate the macOS Seirra silent install
         # 30 second delay should give the jamf binary enough time to upload policy results to JSS
         "$mac_os_installer_path/Contents/Resources/startosinstall" --applicationpath "$mac_os_installer_path"  --volume / --rebootdelay 30 --nointeraction &
-
     fi
 }
 
 # Function that goes through the install
 # Takes parameter $1 which is optional and is simply meant to add additional text to the jamfHelper header
 installOS (){
+    # Prompt for user password for FV Authenticated Restart
+    if [ "$(/usr/bin/fdesetup status | /usr/bin/grep "FileVault is On.")" ]; then
+        fvAuthRestart
+    fi
+    
     # Update message letting end-user know upgrade is going to start.
     "$jamfHelper" -windowType hud -lockhud -heading "macOS Sierra Upgrade $1" -description "$inprogress" -icon "$mas_os_icon" &
     
@@ -448,7 +530,7 @@ installOS (){
     JHPID=$(/bin/echo "$!")
     
     # Run the os installer command
-    installCommand "$2"
+    installCommand
     
     # The macOS install process successfully exits with code 0
     # On the off chance, the installer fails, let's warn the user
@@ -461,7 +543,7 @@ installOS (){
 }
 
 if [[ ! -e "$mac_os_installer_path" ]]; then
-    downloadOSInstaller
+        downloadOSInstaller
     
     # Make sure macOS installer app is on computer
     if [[ ! -e "$mac_os_installer_path" ]]; then
@@ -469,19 +551,15 @@ if [[ ! -e "$mac_os_installer_path" ]]; then
         checkOSInstaller
     fi
     
-    determineOSVersionFromInstallerApp "$mac_os_installer_path"
-    
     minOSReqCheck
     
-    installOS "(2 of 2)" "$base_os_ver"
+    installOS "(2 of 2)"
 else
     checkOSInstaller
     
-    determineOSVersionFromInstallerApp "$mac_os_installer_path"
-    
     minOSReqCheck
     
-    installOS "" "$base_os_ver"
+    installOS ""
 fi
 
 exit 0
