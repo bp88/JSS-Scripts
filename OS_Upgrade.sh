@@ -115,7 +115,7 @@ fi
 insufficient_free_space_for_install_dialog="Your boot drive must have $needed_free_space gigabytes of free space available in order to install $app_name. It currently has $available_free_space gigabytes free. Please free up space and try again. If you need assistance, please contact $it_contact."
 adequate_free_space_for_install_dialog="$app_name is currently downloading. The installation process will begin once the download is complete. Please close all applications."
 no_ac_power="The computer is not plugged into a power source. Please plug it into a power source and start the installation again."
-inprogress="The upgrade to $app_name is now in progress.  Quit all your applications. The computer will restart automatically and you will be prompted to enter your username and password. Once you have authenticated, you can step away for about $time minutes. Do not shutdown or unplug from power during this process."
+inprogress="The upgrade to $app_name is now in progress.  Quit all your applications. The computer will restart automatically. You can step away for about $time minutes. Do not shutdown or unplug from power during this process."
 disable_icloud="iCloud Drive enabled on this computer and the installation cannot continue. Please disable it by going to the Apple menu > System Preferences > iCloud and unchecking iCloud Drive. Once it’s disabled, please start the installation again. You can re-enable iCloud Drive after the upgrade is completed. If you need assistance, please contact $it_contact."
 download_error="The download of macOS has failed. Installation will not proceed. Please contact $it_contact."
 upgrade_error="The installation of macOS has failed. Please contact $it_contact."
