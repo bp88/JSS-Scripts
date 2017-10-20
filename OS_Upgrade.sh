@@ -58,7 +58,7 @@
 # 16: FV2 Status is not Encrypted.
 # 17: Logged in user is not on the list of the FileVault enabled users.
 # 18: Password mismatch. User may have forgotten their password.
-# 19: FileVault authenticated
+# 19: FileVault error with fdesetup. Authenticated restart unsuccessful.
 
 # Variables to determine paths, OS version, disk space, and power connection. Do not edit.
 available_free_space=$(/bin/df -g / | /usr/bin/tail -1 | /usr/bin/awk '{print $4}')
@@ -519,8 +519,12 @@ installCommand (){
 # Takes parameter $1 which is optional and is simply meant to add additional text to the jamfHelper header
 installOS (){
     # Prompt for user password for FV Authenticated Restart
-    if [ "$(/usr/bin/fdesetup status | /usr/bin/grep "FileVault is On.")" ]; then
-        fvAuthRestart
+    if [[ "$(/usr/bin/fdesetup supportsauthrestart)" = "true" ]] && [[ "$os_major_ver" -ge 12 ]]; then
+        if [[ "$(/usr/bin/fdesetup status | /usr/bin/grep "FileVault is On.")" ]]; then
+            fvAuthRestart
+        fi
+    else
+        /bin/echo "Either FileVault authenticated restart is not supported on this Mac or the OS is older than 10.12. Skipping FV authenticated restart."
     fi
     
     # Update message letting end-user know upgrade is going to start.
