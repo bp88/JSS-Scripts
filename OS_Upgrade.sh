@@ -314,7 +314,7 @@ return 0
 # Function to download macOS installer
 downloadOSInstaller (){
     if [[ -n "$custom_trigger_policy_name" ]]; then
-        "$jamfHelper" -windowType hud -lockhud -heading '$app_name Upgrade (1 of 2)' -description "$adequate_free_space_for_install_dialog" -icon "$downloadicon" &
+        "$jamfHelper" -windowType hud -lockhud -heading "$app_name Upgrade (1 of 2)" -description "$adequate_free_space_for_install_dialog" -icon "$downloadicon" &
         JHPID=$(/bin/echo "$!")
         
         "$jamf" policy -event "$custom_trigger_policy_name" -verbose -randomDelaySeconds 0
