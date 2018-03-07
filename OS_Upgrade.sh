@@ -115,7 +115,7 @@ fi
 insufficient_free_space_for_install_dialog="Your boot drive must have $needed_free_space gigabytes of free space available in order to install $app_name. It currently has $available_free_space gigabytes free. Please free up space and try again. If you need assistance, please contact $it_contact."
 adequate_free_space_for_install_dialog="$app_name is currently downloading. The installation process will begin once the download is complete. Please close all applications."
 no_ac_power="The computer is not plugged into a power source. Please plug it into a power source and start the installation again."
-inprogress="The upgrade to $app_name is now in progress.  Quit all your applications. The computer will restart automatically. You can step away for about $time minutes. Do not shutdown or unplug from power during this process."
+inprogress="The upgrade to $app_name is now in progress.  Quit all your applications. The computer will restart automatically and you may be prompted to enter your username and password. Once you have authenticated, you can step away for about $time minutes. Do not shutdown or unplug from power during this process."
 disable_icloud="iCloud Drive enabled on this computer and the installation cannot continue. Please disable it by going to the Apple menu > System Preferences > iCloud and unchecking iCloud Drive. Once it’s disabled, please start the installation again. You can re-enable iCloud Drive after the upgrade is completed. If you need assistance, please contact $it_contact."
 download_error="The download of macOS has failed. Installation will not proceed. Please contact $it_contact."
 upgrade_error="The installation of macOS has failed. Please contact $it_contact."
@@ -314,7 +314,7 @@ return 0
 # Function to download macOS installer
 downloadOSInstaller (){
     if [[ -n "$custom_trigger_policy_name" ]]; then
-        "$jamfHelper" -windowType hud -lockhud -heading 'macOS Sierra Upgrade (1 of 2)' -description "$adequate_free_space_for_install_dialog" -icon "$downloadicon" &
+        "$jamfHelper" -windowType hud -lockhud -heading '$app_name Upgrade (1 of 2)' -description "$adequate_free_space_for_install_dialog" -icon "$downloadicon" &
         JHPID=$(/bin/echo "$!")
         
         "$jamf" policy -event "$custom_trigger_policy_name" -verbose -randomDelaySeconds 0
@@ -528,7 +528,7 @@ installOS (){
     fi
     
     # Update message letting end-user know upgrade is going to start.
-    "$jamfHelper" -windowType hud -lockhud -heading "macOS Sierra Upgrade $1" -description "$inprogress" -icon "$mas_os_icon" &
+    "$jamfHelper" -windowType hud -lockhud -heading "$app_name Upgrade $1" -description "$inprogress" -icon "$mas_os_icon" &
     
     # Get the Process ID of the last command
     JHPID=$(/bin/echo "$!")
