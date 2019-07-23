@@ -100,6 +100,9 @@ if [[ -z "$DeferralValue" ]]; then
     TimeOutinSec="900"
 fi
 
+# Path to temporarily store list of software updates. Avoids having to re-run the softwareupdate command multiple times.
+ListOfSoftwareUpdates="/tmp/ListOfSoftwareUpdates"
+
 #  Set appropriate Software Update icon depending on OS version
 if [[ "$OSMajorVersion" -gt 13 ]]; then
     AppleSUIcon="/System/Library/CoreServices/Software Update.app/Contents/Resources/SoftwareUpdate.icns"
@@ -180,7 +183,7 @@ powerCheck (){
 
 updateCLI (){
     # Install all software updates
-    /usr/sbin/softwareupdate -ia --verbose 2>&1 &
+    /usr/sbin/softwareupdate -ia --verbose 2>&1 >> "$ListOfSoftwareUpdates" &
 }
 
 
@@ -235,6 +238,8 @@ runUpdates (){
     
     SU_EC=$?
     
+    ShutdownRequired=$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep -E "halt|shut down" | /usr/bin/wc -l | /usr/bin/awk '{ print $1 }')
+    
     ## Kill the jamfHelper. If a restart is needed, the user will be prompted. If not the hud will just go away
     /bin/kill -s KILL "$JHPID" &>/dev/null
     
@@ -250,9 +255,6 @@ runUpdates (){
     exit 0
 }
 
-
-# Path to temporarily store list of software updates. Avoids having to re-run the softwareupdate command multiple times.
-ListOfSoftwareUpdates="/tmp/ListOfSoftwareUpdates"
 
 # Store list of software updates in /tmp which gets cleared periodically by the OS and on restarts
 /usr/sbin/softwareupdate -l 2>&1 > "$ListOfSoftwareUpdates"
@@ -272,7 +274,7 @@ LoggedInUser="$(/usr/sbin/scutil <<< "show State:/Users/ConsoleUser" | /usr/bin/
 fvStatusCheck
 
 # If there are no system updates, reset timer and exit script
-if [[ "$UpdatesNoRestart" == "" ]] && [[ "$RestartRequired" == "" ]] && [[ "$ShutdownRequired" == 0 ]]; then
+if [[ "$UpdatesNoRestart" == "" ]] && [[ "$RestartRequired" == "" ]]; then
     echo "No updates at this time."
     setDeferral "$BundleID" "$DeferralType" "$DeferralValue" "$DeferralPlist"
     exit 0
@@ -283,6 +285,7 @@ fi
 if [[ "$LoggedInUser" == "" ]]; then
     powerCheck
     updateCLI
+    ShutdownRequired=$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep -E "halt|shut down" | /usr/bin/wc -l | /usr/bin/awk '{ print $1 }')
     updateRestartAction
 else
     # Someone is logged in. Prompt if any updates require a restart ONLY IF the update timer has not reached zero
