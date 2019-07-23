@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.company.reconafterupdate</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>-c</string>
+		<string>if [[ "$(/usr/bin/mdfind -onlyin /System/Library/CoreServices/ '((kMDItemFSName = "SystemVersion.plist") &amp;&amp; InRange(kMDItemDateAdded,$time.today,$time.today(+1)))' -count)" == 1 ]]; then /usr/local/bin/jamf recon &amp;&amp; /bin/launchctl bootout system/com.company.reconafterupdate; fi;</string>
+	</array>
+	<key>RunAtLoad</key>
+		<true/>
+	<key>ThrottleInterval</key>
+		<integer>60</integer>
+	<key>StartInterval</key>
+		<integer>60</integer>
+</dict>
+</plist>
