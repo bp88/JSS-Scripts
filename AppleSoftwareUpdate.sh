@@ -184,6 +184,17 @@ powerCheck (){
 updateCLI (){
     # Install all software updates
     /usr/sbin/softwareupdate -ia --verbose 2>&1 >> "$ListOfSoftwareUpdates" &
+    
+    ## Get the Process ID of the last command run in the background ($!) and wait for it to complete (wait)
+    SUPID=$(echo "$!")
+    
+    wait $SUPID
+    
+    SU_EC=$?
+    
+    ShutdownRequired=$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep -E "halt|shut down" | /usr/bin/wc -l | /usr/bin/awk '{ print $1 }')
+    
+    return $SU_EC
 }
 
 
@@ -231,15 +242,6 @@ runUpdates (){
     ## Run the jamf policy to insall software updates
     updateCLI
     
-    ## Get the Process ID of the last command run in the background ($!) and wait for it to complete (wait)
-    SUPID=$(echo "$!")
-    
-    wait $SUPID
-    
-    SU_EC=$?
-    
-    ShutdownRequired=$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep -E "halt|shut down" | /usr/bin/wc -l | /usr/bin/awk '{ print $1 }')
-    
     ## Kill the jamfHelper. If a restart is needed, the user will be prompted. If not the hud will just go away
     /bin/kill -s KILL "$JHPID" &>/dev/null
     
@@ -261,7 +263,6 @@ runUpdates (){
 
 UpdatesNoRestart=$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep recommended | /usr/bin/grep -v restart | /usr/bin/cut -d , -f 1 | /usr/bin/sed -e 's/^[[:space:]]*//')
 RestartRequired=$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep restart | /usr/bin/grep -v '\*' | /usr/bin/cut -d , -f 1 | /usr/bin/sed -e 's/^[[:space:]]*//')
-ShutdownRequired=$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep -E "halt|shut down" | /usr/bin/wc -l | /usr/bin/awk '{ print $1 }')
 
 # Determine Secure Enclave version
 SEPType="$(/usr/sbin/system_profiler SPiBridgeDataType | /usr/bin/awk -F: '/Model Name/ { gsub(/.*: /,""); print $0}')"
@@ -285,7 +286,6 @@ fi
 if [[ "$LoggedInUser" == "" ]]; then
     powerCheck
     updateCLI
-    ShutdownRequired=$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep -E "halt|shut down" | /usr/bin/wc -l | /usr/bin/awk '{ print $1 }')
     updateRestartAction
 else
     # Someone is logged in. Prompt if any updates require a restart ONLY IF the update timer has not reached zero
