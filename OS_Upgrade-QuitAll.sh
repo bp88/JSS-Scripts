@@ -59,6 +59,8 @@
 # 17: Logged in user is not on the list of the FileVault enabled users.
 # 18: Password mismatch. User may have forgotten their password.
 # 19: FileVault error with fdesetup. Authenticated restart unsuccessful.
+# 20: Failed to quit all applications before running the installer.
+
 
 # Variables to determine paths, OS version, disk space, and power connection. Do not edit.
 available_free_space=$(/bin/df -g / | /usr/bin/tail -1 | /usr/bin/awk '{print $4}')
@@ -545,6 +547,37 @@ installOS (){
     fi
     exit 0
 }
+
+# Prompt all running applications to quit before running the installer
+exitCode=$(osascript <<EOD
+tell application "System Events" to set the visible of every process to true
+set white_list to {"Finder", "Self Service"}
+try
+    tell application "Finder"
+        set process_list to the name of every process whose visible is true
+    end tell
+    repeat with i from 1 to (number of items in process_list)
+        set this_process to item i of the process_list
+        if this_process is not in white_list then
+            tell application this_process
+                quit
+            end tell
+        end if
+    end repeat
+on error
+    tell the current application to display dialog "We were unable to close all applications." & return & "Please save your work, close all applications, and try again." buttons {"Quit"} default button 1 with icon 0
+	if button returned of result = "Quit" then
+		set exitCode to "Quit"
+	end if
+end try
+EOD)
+
+#   If not all applications were closed properly, log comment and exit
+if [ $exitCode == "Quit" ]; then
+	/bin/echo "Unable to close all applications before running installer"
+	exit 20
+fi	
+
 
 if [[ ! -e "$mac_os_installer_path" ]]; then
         downloadOSInstaller
