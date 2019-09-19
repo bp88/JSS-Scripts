@@ -314,7 +314,7 @@ return 0
 # Function to download macOS installer
 downloadOSInstaller (){
     if [[ -n "$custom_trigger_policy_name" ]]; then
-        "$jamfHelper" -windowType hud -lockhud -heading "$app_name Upgrade (1 of 2)" -description "$adequate_free_space_for_install_dialog" -icon "$downloadicon" &
+        "$jamfHelper" -windowType hud -lockhud -heading "$app_name (1 of 2)" -description "$adequate_free_space_for_install_dialog" -icon "$downloadicon" &
         JHPID=$(/bin/echo "$!")
         
         "$jamf" policy -event "$custom_trigger_policy_name" -verbose -randomDelaySeconds 0
@@ -528,13 +528,16 @@ installOS (){
     fi
     
     # Update message letting end-user know upgrade is going to start.
-    "$jamfHelper" -windowType hud -lockhud -heading "$app_name Upgrade $1" -description "$inprogress" -icon "$mas_os_icon" &
+    "$jamfHelper" -windowType hud -lockhud -heading "$app_name $1" -description "$inprogress" -icon "$mas_os_icon" &
     
     # Get the Process ID of the last command
     JHPID=$(/bin/echo "$!")
     
     # Run the os installer command
     installCommand
+    
+    # Quit Self Service
+    /usr/bin/killall "Self Service"
     
     # The macOS install process successfully exits with code 0
     # On the off chance, the installer fails, let's warn the user
