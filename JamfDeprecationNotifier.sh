@@ -7,8 +7,8 @@
 # proceed with the upgrade, they will get taken to a second policy that you've configured
 # to do the OS upgrade.
 #
-# There are three optional dates that you can supply that will dictate the notifications
-# the user receives.
+# There are three optional dates that you can supply that will dictate the notifications the user
+# receives.
 # Start Date: This provides a notification to the user but also allows them to delay when
 #   they will receive the next reminder.
 # Nag Date: This provides a notification to the user. The user cannot select when to be
@@ -99,7 +99,7 @@
 #
 # There are a few exit codes in this script that may indicate points of failure:
 # 10: Required parameter has been left empty.
-# 11: End date is lower than start date
+# 11: Make sure Start date < Nag date < End date.
 # 12: Minimum Supported OS Major Version is not an integer.
 # 13: Minimum Supported OS Major Version is not an integer.
 # 14: Incorrect property list type used. Valid types include: "array" "dict" "string"
@@ -413,7 +413,7 @@ setNextReminderTime(){
     
     # Next Run Time in string format
     NextReminderTimeString="$(/bin/date -r $NextReminderEpochTime +"%a %b %d %T %Z %Y")"
-    echo "User will be reminded after: $NextRunStringDateTime"
+    echo "User will be reminded after: $NextReminderTimeString"
     
     # Record Next Reminder Time
     setPlistValue "$BundleID" "NextReminderEpochTime" "integer" "$NextReminderEpochTime" "$DeprecationPlist"
@@ -646,6 +646,9 @@ isReadyForReminder() {
         
         # Set next reminder time
         setNextReminderTime "$TimeChosen"
+    else
+        echo "Current time is $CurrentRunTimeString. User will be reminded after NextReminderTimeString."
+        exit 0
     fi
 }
 
