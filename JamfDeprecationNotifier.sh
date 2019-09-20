@@ -647,7 +647,7 @@ isReadyForReminder() {
         # Set next reminder time
         setNextReminderTime "$TimeChosen"
     else
-        echo "Current time is $CurrentRunTimeString. User will be reminded after NextReminderTimeString."
+        echo "Current time is $CurrentRunTimeString. User will be reminded after $NextReminderTimeString."
         exit 0
     fi
 }
