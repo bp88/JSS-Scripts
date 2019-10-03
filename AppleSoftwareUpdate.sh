@@ -140,7 +140,7 @@ ContactMsg="There seems to have been an error installing the updates. You can tr
 If the error persists, please contact $ITContact."
 
 # Message to display when computer is running off battery
-no_ac_power="The computer is currently running off battery and is not plugged into a power source. Please plug the computer into a power source and try again."
+no_ac_power="The computer is currently running off battery and is not plugged into a power source."
 
 # Standard Update Message
 StandardUpdatePrompt="There is an OS update available for your Mac. Please click Continue to proceed to Software Update to run this update. If you are unable to start the process at this time, you may choose to postpone by one day.
@@ -183,9 +183,10 @@ powerCheck (){
 
 updateCLI (){
     # Install all software updates
-    /usr/sbin/softwareupdate -ia --verbose 2>&1 >> "$ListOfSoftwareUpdates" &
+    /usr/sbin/softwareupdate -ia 2>&1 >> "$ListOfSoftwareUpdates" &
     
     ## Get the Process ID of the last command run in the background ($!) and wait for it to complete (wait)
+    # If you don't wait, the computer may take a restart action before updates are finished
     SUPID=$(echo "$!")
     
     wait $SUPID
@@ -193,6 +194,8 @@ updateCLI (){
     SU_EC=$?
     
     ShutdownRequired=$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep -E "halt|shut down" | /usr/bin/wc -l | /usr/bin/awk '{ print $1 }')
+    
+    echo $SU_EC
     
     return $SU_EC
 }
@@ -240,7 +243,7 @@ runUpdates (){
     JHPID=$(echo "$!")
     
     ## Run the jamf policy to insall software updates
-    updateCLI
+    SU_EC="$(updateCLI)"
     
     ## Kill the jamfHelper. If a restart is needed, the user will be prompted. If not the hud will just go away
     /bin/kill -s KILL "$JHPID" &>/dev/null
@@ -257,6 +260,26 @@ runUpdates (){
     exit 0
 }
 
+# Function to do best effort check if using presentation or web conferencing is active
+checkForDisplaySleepAssertions() {
+    Assertions="$(/usr/bin/pmset -g assertions | /usr/bin/awk '/NoDisplaySleepAssertion | PreventUserIdleDisplaySleep/ && match($0,/\(.+\)/) && ! /coreaudiod/ {gsub(/^\ +/,"",$0); print};')"
+    
+    # There are multiple types of power assertions an app can assert.
+    # These specifically tend to be used when an app wants to try and prevent the OS from going to display sleep.
+    # Scenarios where an app may not want to have the display going to sleep include, but are not limited to:
+    #   Presentation (KeyNote, PowerPoint)
+    #   Web conference software (Zoom, Webex)
+    #   Screen sharing session
+    # Apps have to make the assertion and therefore it's possible some apps may not get captured.
+    # Some assertions can be found here: https://developer.apple.com/documentation/iokit/iopmlib_h/iopmassertiontypes
+    if [[ "$Assertions" ]]; then
+        echo "The following display-related power assertions have been detected:"
+        echo "$Assertions"
+        echo "Exiting script to avoid disrupting user while these power assertions are active."
+        
+        exit 0
+    fi
+}
 
 # Store list of software updates in /tmp which gets cleared periodically by the OS and on restarts
 /usr/sbin/softwareupdate -l 2>&1 > "$ListOfSoftwareUpdates"
@@ -285,9 +308,11 @@ fi
 # If there is no one logged in, let's try to run the updates.
 if [[ "$LoggedInUser" == "" ]]; then
     powerCheck
-    updateCLI
+    updateCLI &>/dev/null
     updateRestartAction
 else
+    checkForDisplaySleepAssertions
+    
     # Someone is logged in. Prompt if any updates require a restart ONLY IF the update timer has not reached zero
     if [[ "$RestartRequired" != "" ]]; then
         if [[ "$CurrentDeferralValue" -gt 0 ]]; then
@@ -323,7 +348,7 @@ fi
 # A simple stop gap to see if either process is running.
 if [[ "$UpdatesNoRestart" != "" ]] && [[ ! "$(/bin/ps -axc | /usr/bin/grep -e Safari$)" ]] && [[ "$(/bin/ps -axc | /usr/bin/grep -e iTunes$)" ]]; then
     powerCheck
-    updateCLI
+    updateCLI &>/dev/null
 fi
 
 exit 0
