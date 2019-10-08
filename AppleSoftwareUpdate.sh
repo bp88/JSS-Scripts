@@ -346,7 +346,7 @@ fi
 # Install updates that do not require a restart
 # Future Fix: Might want to see if Safari and iTunes are running as sometimes these apps sometimes do not require a restart but do require that the apps be closed
 # A simple stop gap to see if either process is running.
-if [[ "$UpdatesNoRestart" != "" ]] && [[ ! "$(/bin/ps -axc | /usr/bin/grep -e Safari$)" ]] && [[ "$(/bin/ps -axc | /usr/bin/grep -e iTunes$)" ]]; then
+if [[ "$UpdatesNoRestart" != "" ]] && [[ ! "$(/bin/ps -axc | /usr/bin/grep -e Safari$)" ]] && [[ ! "$(/bin/ps -axc | /usr/bin/grep -e iTunes$)" ]]; then
     powerCheck
     updateCLI &>/dev/null
 fi
