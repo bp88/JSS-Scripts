@@ -47,7 +47,7 @@ setDeferral (){
     DeferralType="${2}"
     DeferralValue="${3}"
     DeferralPlist="${4}"
-    
+
     if [[ "$DeferralType" == "date" ]]; then
         DeferralDate="$(/usr/libexec/PlistBuddy -c "print :$BundleID:date" "$DeferralPlist" 2>/dev/null)"
         # Set deferral date
@@ -182,21 +182,25 @@ powerCheck (){
 
 
 updateCLI (){
-    # Install all software updates
-    /usr/sbin/softwareupdate -ia 2>&1 >> "$ListOfSoftwareUpdates" &
-    
+  # Install all software updates. If OS is > 10.13.4, use softwareupdate's restart option.
+  if [[ "$OSMajorVersion" -eq 13 ]] && [[ "$OSMinorVersion" -ge 4 ]] || [[ "$OSMajorVersion" -ge 14 ]]; then
+    /usr/sbin/softwareupdate -ia -R >> "$ListOfSoftwareUpdates" 2>&1 &
+  else
+    /usr/sbin/softwareupdate -ia >> "$ListOfSoftwareUpdates" 2>&1 &
+  fi
+
     ## Get the Process ID of the last command run in the background ($!) and wait for it to complete (wait)
     # If you don't wait, the computer may take a restart action before updates are finished
     SUPID=$(echo "$!")
-    
+
     wait $SUPID
-    
+
     SU_EC=$?
-    
+
     ShutdownRequired=$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep -E "halt|shut down" | /usr/bin/wc -l | /usr/bin/awk '{ print $1 }')
-    
+
     echo $SU_EC
-    
+
     return $SU_EC
 }
 
@@ -238,32 +242,32 @@ fvStatusCheck (){
 
 runUpdates (){
     "$jamfHelper" -windowType hud -lockhud -title "Apple Software Update" -description "$HUDMessage""START TIME: $(/bin/date +"%b %d %Y %T")" -icon "$AppleSUIcon" &>/dev/null &
-    
+
     ## We'll need the pid of jamfHelper to kill it once the updates are complete
     JHPID=$(echo "$!")
-    
+
     ## Run the jamf policy to insall software updates
     SU_EC="$(updateCLI)"
-    
+
     ## Kill the jamfHelper. If a restart is needed, the user will be prompted. If not the hud will just go away
     /bin/kill -s KILL "$JHPID" &>/dev/null
-    
+
     if [[ "$SU_EC" == 0 ]]; then
         updateRestartAction
     else
         echo "/usr/bin/softwareupdate failed. Exit Code: $SU_EC"
-        
+
         "$jamfHelper" -windowType utility -icon "$AppleSUIcon" -title "Apple Software Updates" -description "$ContactMsg" -button1 "OK"
         exit 12
     fi
-    
+
     exit 0
 }
 
 # Function to do best effort check if using presentation or web conferencing is active
 checkForDisplaySleepAssertions() {
     Assertions="$(/usr/bin/pmset -g assertions | /usr/bin/awk '/NoDisplaySleepAssertion | PreventUserIdleDisplaySleep/ && match($0,/\(.+\)/) && ! /coreaudiod/ {gsub(/^\ +/,"",$0); print};')"
-    
+
     # There are multiple types of power assertions an app can assert.
     # These specifically tend to be used when an app wants to try and prevent the OS from going to display sleep.
     # Scenarios where an app may not want to have the display going to sleep include, but are not limited to:
@@ -276,13 +280,13 @@ checkForDisplaySleepAssertions() {
         echo "The following display-related power assertions have been detected:"
         echo "$Assertions"
         echo "Exiting script to avoid disrupting user while these power assertions are active."
-        
+
         exit 0
     fi
 }
 
 # Store list of software updates in /tmp which gets cleared periodically by the OS and on restarts
-/usr/sbin/softwareupdate -l 2>&1 > "$ListOfSoftwareUpdates"
+/usr/sbin/softwareupdate -l > "$ListOfSoftwareUpdates" 2>&1
 
 UpdatesNoRestart=$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep recommended | /usr/bin/grep -v restart | /usr/bin/cut -d , -f 1 | /usr/bin/sed -e 's/^[[:space:]]*//')
 RestartRequired=$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep restart | /usr/bin/grep -v '\*' | /usr/bin/cut -d , -f 1 | /usr/bin/sed -e 's/^[[:space:]]*//')
@@ -312,23 +316,23 @@ if [[ "$LoggedInUser" == "" ]]; then
     updateRestartAction
 else
     checkForDisplaySleepAssertions
-    
+
     # Someone is logged in. Prompt if any updates require a restart ONLY IF the update timer has not reached zero
     if [[ "$RestartRequired" != "" ]]; then
         if [[ "$CurrentDeferralValue" -gt 0 ]]; then
             # Reduce the timer by 1. The script will run again the next day
             let CurrTimer=$CurrentDeferralValue-1
             setDeferral "$BundleID" "$DeferralType" "$CurrTimer" "$DeferralPlist"
-            
+
             # If someone is logged in and they have not canceled $DeferralValue times already, prompt them to install updates that require a restart and state how many more times they can press 'cancel' before updates run automatically.
             HELPER=$("$jamfHelper" -windowType utility -icon "$AppleSUIcon" -title "Apple Software Updates" -description "$StandardUpdatePrompt" -button1 "Continue" -button2 "Postpone" -cancelButton "2" -defaultButton 2 -timeout "$TimeOutinSec")
             echo "Jamf Helper Exit Code: $HELPER"
-            
+
             # If they click "Update" then take them to the software update preference pane
             if [ "$HELPER" == "0" ]; then
                 updateGUI
             fi
-            
+
             exit 0
         else
             HELPER=$("$jamfHelper" -windowType utility -icon "$AppleSUIcon" -title "Apple Software Update" -description "$ForcedUpdatePrompt" -button1 "Update" -defaultButton 1 -timeout "$TimeOutinSec" -countdown -alignCountdown "right")
