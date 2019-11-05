@@ -36,6 +36,9 @@
 # Why? Apple may have released a specific feature (e.g. disable iCloud Doc Sync via config profile in 10.12.4+) that is in a newer minor update
 # that you want to make use of immediately after computer has been upgraded.
 #
+# Optional: Parameter $9 is used to provide the contact email, number or name of the IT department for the end user to reach out to should issues arise.
+# The phrase will be "Please contact <insert info from parameter 9>"
+#
 #
 # In case you want to examine why the script may have failed, I've provided exit codes.
 # Exit Codes
@@ -74,6 +77,7 @@ time="${5}"
 custom_trigger_policy_name="${6}"
 add_install_pkg="${7}"
 min_os_app_ver="${8}"
+it_contact="${9}"
 app_name="$(echo "$mac_os_installer_path" | /usr/bin/awk '{ gsub(/.*Install macOS /,""); gsub(/.app/,""); print $0}')"
 #mac_os_install_ver="$(/usr/bin/defaults read "$mac_os_installer_path"/Contents/Info.plist CFBundleShortVersionString)"
 
@@ -100,7 +104,6 @@ filevaulticon="/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/
 # Variables that you should edit.
 # You can supply an email address or contact number for your end users to contact you. This will appear in JAMF Helper dialogs.
 # If left blank, it will default to just "IT" which may not be as helpful to your end users.
-it_contact="IT"
 
 if [[ -z "$it_contact" ]]; then
     it_contact="IT"
