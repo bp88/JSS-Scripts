@@ -19,7 +19,8 @@
 # JAMF Pro Script Parameters:
 # Parameter 4: Optional. Number of postponements allowed. Default: 3
 # Parameter 5: Optional. Number of seconds dialog should remain up. Default: 900 seconds
-# Parameter 6: Optional. Contact email, number, department name in messaging. Default: IT
+# Parameter 6: Optional. Contact email, number, or department name used in messaging.
+#              Default: IT
 #
 # Here is the expected workflow with this script:
 # If no user is logged in, the script will install updates through the command line and
