@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/zsh
 
 # This script is meant to be used with Jamf Pro and makes use of Jamf Helper.
 # The idea behind this script is that it alerts the user that there are required OS
@@ -49,22 +49,24 @@ setDeferral (){
     DeferralPlist="${4}"
     
     if [[ "$DeferralType" == "date" ]]; then
-        DeferralDate="$(/usr/libexec/PlistBuddy -c "print :$BundleID:date" "$DeferralPlist" 2>/dev/null)"
+        DeferralDate="$(/usr/libexec/PlistBuddy -c "print :"$BundleID":date" "$DeferralPlist" 2>/dev/null)"
         # Set deferral date
-        if [[ -n "$DeferralDate" ]] && [[ ! "$DeferralDate" =~ "File Doesn't Exist" ]]; then
-            # /usr/libexec/PlistBuddy -c "set :$BundleID:date '07/04/2019 11:21:51 +0000'" "$DeferralPlist"
-            /usr/libexec/PlistBuddy -c "set :$BundleID:date $DeferralValue" "$DeferralPlist" 2>/dev/null
+        if [[ -n "$DeferralDate" ]] && [[ ! "$DeferralDate" == *"File Doesn't Exist"* ]]; then
+            # PlistBuddy command example
+            # /usr/libexec/PlistBuddy -c "set :"$BundleID":date '07/04/2019 11:21:51 +0000'" "$DeferralPlist"
+            /usr/libexec/PlistBuddy -c "set :"$BundleID":date $DeferralValue" "$DeferralPlist" 2>/dev/null
         else
-            # /usr/libexec/PlistBuddy -c "add :$BundleID:date date '07/04/2019 11:21:51 +0000'" "$DeferralPlist"
-            /usr/libexec/PlistBuddy -c "add :$BundleID:date date $DeferralValue" "$DeferralPlist" 2>/dev/null
+            # PlistBuddy command example
+            # /usr/libexec/PlistBuddy -c "add :"$BundleID":date date '07/04/2019 11:21:51 +0000'" "$DeferralPlist"
+            /usr/libexec/PlistBuddy -c "add :"$BundleID":date date $DeferralValue" "$DeferralPlist" 2>/dev/null
         fi
     elif [[ "$DeferralType" == "count" ]]; then
-        DeferralCount="$(/usr/libexec/PlistBuddy -c "print :$BundleID:count" "$DeferralPlist" 2>/dev/null)"
+        DeferralCount="$(/usr/libexec/PlistBuddy -c "print :"$BundleID":count" "$DeferralPlist" 2>/dev/null)"
         # Set deferral count
-        if [[ -n "$DeferralCount" ]] && [[ ! "$DeferralCount" =~ "File Doesn't Exist" ]]; then
-            /usr/libexec/PlistBuddy -c "set :$BundleID:count $DeferralValue" "$DeferralPlist" 2>/dev/null
+        if [[ -n "$DeferralCount" ]] && [[ ! "$DeferralCount" == *"File Doesn't Exist"* ]]; then
+            /usr/libexec/PlistBuddy -c "set :"$BundleID":count $DeferralValue" "$DeferralPlist" 2>/dev/null
         else
-            /usr/libexec/PlistBuddy -c "add :$BundleID:count integer $DeferralValue" "$DeferralPlist" 2>/dev/null
+            /usr/libexec/PlistBuddy -c "add :"$BundleID":count integer $DeferralValue" "$DeferralPlist" 2>/dev/null
         fi
     else
         echo "Incorrect deferral type used"
@@ -72,10 +74,13 @@ setDeferral (){
     fi
 }
 
+# Set path where deferral plist will be placed
+DeferralPlistPath="/Library/Application Support/JAMF"
+[[ ! -d "$DeferralPlistPath" ]] && /bin/mkdir -p "$DeferralPlistPath"
 
 OSMajorVersion="$(/usr/bin/sw_vers -productVersion | /usr/bin/cut -d '.' -f 2)"
 OSMinorVersion="$(/usr/bin/sw_vers -productVersion | /usr/bin/cut -d '.' -f 3)"
-DeferralPlist="/Library/Application Support/JAMF/com.custom.deferrals.plist"
+DeferralPlist="$DeferralPlistPath/com.custom.deferrals.plist"
 BundleID="com.apple.SoftwareUpdate"
 DeferralType="count"
 DeferralValue="${4}"
@@ -84,12 +89,12 @@ if [[ -z "$DeferralValue" ]]; then
     DeferralValue=3
 fi
 
-CurrentDeferralValue="$(/usr/libexec/PlistBuddy -c "print :$BundleID:count" "$DeferralPlist" 2>/dev/null)"
+CurrentDeferralValue="$(/usr/libexec/PlistBuddy -c "print :"$BundleID":count" "$DeferralPlist" 2>/dev/null)"
 
 # Set up the deferral value if it does not exist already
-if [[ -z "$CurrentDeferralValue" ]] || [[ "$CurrentDeferralValue" =~ "File Doesn't Exist" ]]; then
+if [[ -z "$CurrentDeferralValue" ]] || [[ "$CurrentDeferralValue" == *"File Doesn't Exist"* ]]; then
     setDeferral "$BundleID" "$DeferralType" "$DeferralValue" "$DeferralPlist"
-    CurrentDeferralValue="$(/usr/libexec/PlistBuddy -c "print :$BundleID:count" "$DeferralPlist" 2>/dev/null)"
+    CurrentDeferralValue="$(/usr/libexec/PlistBuddy -c "print :"$BundleID":count" "$DeferralPlist" 2>/dev/null)"
 fi
 
 jamfHelper="/Library/Application Support/JAMF/bin/jamfHelper.app/Contents/MacOS/jamfHelper"
@@ -170,8 +175,9 @@ powerCheck (){
     # the update process.
     # Let's wait 5 minutes to see if computer gets plugged into power.
     for (( i = 1; i <= 5; ++i )); do
-        if [[ "$(/usr/bin/pmset -g ps | /usr/bin/grep "Battery Power")" = "Now drawing from 'Battery Power'" ]]; then
+        if [[ "$(/usr/bin/pmset -g ps | /usr/bin/grep "Battery Power")" = "Now drawing from 'Battery Power'" ]] && [[ $i = 5 ]]; then
             echo "$no_ac_power"
+        elif [[ "$(/usr/bin/pmset -g ps | /usr/bin/grep "Battery Power")" = "Now drawing from 'Battery Power'" ]]; then
             /bin/sleep 60
         else
             return 0
@@ -193,8 +199,6 @@ updateCLI (){
     
     SU_EC=$?
     
-    ShutdownRequired=$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep -E "halt|shut down" | /usr/bin/wc -l | /usr/bin/awk '{ print $1 }')
-    
     echo $SU_EC
     
     return $SU_EC
@@ -203,13 +207,27 @@ updateCLI (){
 
 updateRestartAction (){
     # On T2 hardware, we need to shutdown on certain updates
-    if [[ "$ShutdownRequired" == "1" ]] && [[ "$SEPType" ]]; then
-        if [[ "$OSMajorVersion" -eq 13 ]] && [[ "$OSMinorVersion" -ge 4 ]] || [[ "$OSMajorVersion" -ge 14 ]]; then
+    # Verbiage found when installing updates that require a shutdown:
+    #   To install these updates, your computer must shut down. Your computer will automatically start up to finish installation.
+    #   Installation will not complete successfully if you choose to restart your computer instead of shutting down.
+    #   Please call halt(8) or select Shut Down from the Apple menu. To automate the shutdown process with softwareupdate(8), use --restart.
+    if [[ "$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep -E "Please call halt")" || "$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep -E "your computer must shut down")" ]] && [[ "$SEPType" ]]; then
+        if [[ "$OSMajorVersion" -eq 13 && "$OSMinorVersion" -ge 4 ]] || [[ "$OSMajorVersion" -ge 14 ]]; then
+            # Resetting the deferral count
+            setDeferral "$BundleID" "$DeferralType" "$DeferralValue" "$DeferralPlist"
+            
+            echo "Restart Action: Shutdown/Halt"
+            
             /sbin/shutdown -h now
             exit 0
         fi
     fi
+    # Resetting the deferral count
+    setDeferral "$BundleID" "$DeferralType" "$DeferralValue" "$DeferralPlist"
+    
     # If no shutdown is required then let's go ahead and restart
+    echo "Restart Action: Restart"
+    
     /sbin/shutdown -r now
     exit 0
 }
@@ -248,7 +266,7 @@ runUpdates (){
     ## Kill the jamfHelper. If a restart is needed, the user will be prompted. If not the hud will just go away
     /bin/kill -s KILL "$JHPID" &>/dev/null
     
-    if [[ "$SU_EC" == 0 ]]; then
+    if [[ "$SU_EC" -eq 0 ]]; then
         updateRestartAction
     else
         echo "/usr/bin/softwareupdate failed. Exit Code: $SU_EC"
@@ -284,14 +302,13 @@ checkForDisplaySleepAssertions() {
 # Store list of software updates in /tmp which gets cleared periodically by the OS and on restarts
 /usr/sbin/softwareupdate -l 2>&1 > "$ListOfSoftwareUpdates"
 
-UpdatesNoRestart=$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep recommended | /usr/bin/grep -v restart | /usr/bin/cut -d , -f 1 | /usr/bin/sed -e 's/^[[:space:]]*//')
-RestartRequired=$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep restart | /usr/bin/grep -v '\*' | /usr/bin/cut -d , -f 1 | /usr/bin/sed -e 's/^[[:space:]]*//')
+UpdatesNoRestart=$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep recommended | /usr/bin/grep -v restart | /usr/bin/cut -d , -f 1 | /usr/bin/sed -e 's/^[[:space:]]*//' | /usr/bin/sed -e 's/^Title:\ *//')
+RestartRequired=$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep restart | /usr/bin/grep -v '\*' | /usr/bin/cut -d , -f 1 | /usr/bin/sed -e 's/^[[:space:]]*//' | /usr/bin/sed -e 's/^Title:\ *//')
 
 # Determine Secure Enclave version
 SEPType="$(/usr/sbin/system_profiler SPiBridgeDataType | /usr/bin/awk -F: '/Model Name/ { gsub(/.*: /,""); print $0}')"
 
 # Determine currently logged in user
-#LoggedInUser=$(python -c 'from SystemConfiguration import SCDynamicStoreCopyConsoleUser; import sys; username = (SCDynamicStoreCopyConsoleUser(None, None, None) or [None])[0]; username = [username,""][username in [u"loginwindow", None, u""]]; sys.stdout.write(username + "\n");')
 LoggedInUser="$(/usr/sbin/scutil <<< "show State:/Users/ConsoleUser" | /usr/bin/awk '/Name :/ && ! /loginwindow/ { print $3 }')"
 
 # Let's make sure FileVault isn't encrypting before proceeding any further
@@ -325,7 +342,7 @@ else
             echo "Jamf Helper Exit Code: $HELPER"
             
             # If they click "Update" then take them to the software update preference pane
-            if [ "$HELPER" == "0" ]; then
+            if [ "$HELPER" -eq 0 ]; then
                 updateGUI
             fi
             
@@ -336,7 +353,7 @@ else
             # If they click Install Updates then run the updates
             # Looks like someone tried to quit jamfHelper or the jamfHelper screen timed out
             # The Timer is already 0, run the updates automatically, the end user has been warned!
-            if [[ "$HELPER" == "0" ]] || [[ "$HELPER" == "239" ]]; then
+            if [[ "$HELPER" -eq "0" ]] || [[ "$HELPER" -eq "239" ]]; then
                 runUpdates
             fi
         fi
