@@ -19,6 +19,7 @@
 # JAMF Pro Script Parameters:
 # Parameter 4: Optional. Number of postponements allowed. Default: 3
 # Parameter 5: Optional. Number of seconds dialog should remain up. Default: 900 seconds
+# Parameter 6: Optional. Contact email, number, department name in messaging. Default: IT
 #
 # Here is the expected workflow with this script:
 # If no user is logged in, the script will install updates through the command line and
@@ -84,10 +85,13 @@ DeferralPlist="$DeferralPlistPath/com.custom.deferrals.plist"
 BundleID="com.apple.SoftwareUpdate"
 DeferralType="count"
 DeferralValue="${4}"
+TimeOutinSec="${5}"
+ITContact="${6}"
 
-if [[ -z "$DeferralValue" ]]; then
-    DeferralValue=3
-fi
+# Set default values
+[[ -z "$DeferralValue" ]] && DeferralValue=3
+[[ -z "$DeferralValue" ]] && TimeOutinSec="900"
+[[ -z "$ITContact" ]] && ITContact="IT"
 
 CurrentDeferralValue="$(/usr/libexec/PlistBuddy -c "print :"$BundleID":count" "$DeferralPlist" 2>/dev/null)"
 
@@ -99,11 +103,6 @@ fi
 
 jamfHelper="/Library/Application Support/JAMF/bin/jamfHelper.app/Contents/MacOS/jamfHelper"
 jamf="/usr/local/bin/jamf"
-TimeOutinSec="${5}"
-
-if [[ -z "$DeferralValue" ]]; then
-    TimeOutinSec="900"
-fi
 
 # Path to temporarily store list of software updates. Avoids having to re-run the softwareupdate command multiple times.
 ListOfSoftwareUpdates="/tmp/ListOfSoftwareUpdates"
@@ -134,12 +133,6 @@ else
 fi
 
 # Message to let user to contact IT
-ITContact=""
-
-if [[ -z "$ITContact" ]]; then
-    ITContact="IT"
-fi
-
 ContactMsg="There seems to have been an error installing the updates. You can try again $SUGuide
 
 If the error persists, please contact $ITContact."
