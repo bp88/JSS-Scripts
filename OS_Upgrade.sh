@@ -78,7 +78,7 @@ custom_trigger_policy_name="${6}"
 add_install_pkg="${7}"
 min_os_app_ver="${8}"
 it_contact="${9}"
-app_name="$(echo "$mac_os_installer_path" | /usr/bin/awk '{ gsub(/.*Install macOS /,""); gsub(/.app/,""); print $0}')"
+app_name="$(echo "$mac_os_installer_path" | /usr/bin/awk '{ gsub(/.*Install (macOS |Mac OS X |OS X )/,""); gsub(/.app/,""); print $0}')"
 #mac_os_install_ver="$(/usr/bin/defaults read "$mac_os_installer_path"/Contents/Info.plist CFBundleShortVersionString)"
 
 # Path to various icons used with JAMF Helper
@@ -388,6 +388,9 @@ checkForMountedInstallESD (){
 }
 
 checkForFreeSpace (){
+    # Default value for $needed_free_space to 25GB
+    [[ -z "$needed_free_space" ]] && local needed_free_space="25"
+    
     # Check for to make sure free disk space required is a positive integer
     if [[ ! "$needed_free_space" =~ ^[0-9]+$ ]]; then
         echo "Enter a positive integer value (no decimals) for free disk space required."
@@ -399,7 +402,7 @@ checkForFreeSpace (){
     
     # Checking for two conditions: 1) enough space to download the download installer, and
     # 2) the installer is on disk but there is not enough space for what the installer needs to proceed
-    if [[ "$available_free_space" -lt 20 ]] || [[ "$available_free_space" -lt "$needed_free_space" ]]; then
+    if [[ "$available_free_space" -lt 25 ]] || [[ "$available_free_space" -lt "$needed_free_space" ]]; then
         echo "$insufficient_free_space_for_install_dialog"
         "$jamfHelper" -windowType utility -icon "$driveicon" -heading "Insufficient Free Space" -description "$insufficient_free_space_for_install_dialog" -button1 "Exit" -defaultButton 1 &
         exit 11
@@ -490,7 +493,7 @@ minOSReqCheck (){
 }
 
 # Function to check that the additional post-install package is available is a proper distribution-style package with a product id
-checkPostInstallPKG (){
+validatePostInstallPKG (){
     if [[ -z "$add_install_pkg" ]]; then
         return 0
     elif [[ "$(compareLooseVersion 10.13 $base_os_ver)" = True ]] && [[ -n "$add_install_pkg" ]]; then
@@ -515,7 +518,7 @@ checkPostInstallPKG (){
     # Check Distribution file for a product id
     /bin/cat /tmp/"$file_name"/Distribution | /usr/bin/grep "<product id=\"" &>/dev/null
     
-    if [[ $? = 0 ]]; then
+    if [[ $? -eq 0 ]]; then
         /bin/rm -rf /tmp/"$file_name"
         return 0
     else
@@ -732,11 +735,15 @@ installOS (){
     # Quit Self Service
     /usr/bin/killall "Self Service"
     
+    # Create launch daemon to update inventory post-OS upgrade
+    createReconAfterUpgradeLaunchDaemon
+    
     # /sbin/shutdown -r now &
     
     exit 0
 }
 
+# Function to attempt to quit all active applications
 quitAllApps (){
     # Prompt all running applications to quit before running the installer
     if [[ -z "$logged_in_user" ]]; then
@@ -792,6 +799,39 @@ EOD)"
     return 0
 }
 
+# Implement a self-deleting launch daemon to perform a Jamf Pro recon on first boot
+createReconAfterUpgradeLaunchDaemon (){
+    # This launch daemon will self-delete after successfully completing a Jamf recon
+    # Launch Daemon Label and Path
+    local launch_daemon="com.custom.postinstall.jamfrecon"
+    local launch_daemon_path="$3/Library/LaunchDaemons/$launch_daemon".plist
+    
+    # Creating launch daemon
+    echo "<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>$launch_daemon</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/zsh</string>
+		<string>-c</string>
+		<string>if [[ \"\$(/usr/bin/mdfind -onlyin /System/Library/CoreServices/ '((kMDItemFSName = \"SystemVersion.plist\") &amp;&amp; InRange(kMDItemDateAdded,\$time.today,\$time.today(+1)))' -count)\" == 1 ]]; then /usr/local/bin/jamf recon &amp;&amp; /bin/rm -f /Library/LaunchDaemons/$launch_daemon.plist; /bin/launchctl bootout system/$launch_daemon; fi;</string>
+	</array>
+	<key>RunAtLoad</key>
+		<true/>
+	<key>StartInterval</key>
+		<integer>60</integer>
+</dict>
+</plist>" > "$launch_daemon_path"
+    
+    # Set proper permissions on launch daemon
+    if [[ -e "$launch_daemon_path" ]]; then
+        /usr/sbin/chown root:wheel "$launch_daemon_path"
+        /bin/chmod 644 "$launch_daemon_path"
+    fi
+}
 
 # Run through a few pre-download checks
 checkParam "$time" "time"
@@ -831,7 +871,7 @@ checkMinReqOSValue
 validateAppExpirationDate
 checkForMountedInstallESD "/Volumes/InstallESD"
 checkForMountedInstallESD "/Volumes/OS X Install ESD"
-checkPostInstallPKG
+validatePostInstallPKG
 quitAllApps
 
 minOSReqCheck
