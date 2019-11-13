@@ -52,7 +52,7 @@
 # 9: The startosinstall exit code was not 0 or 255 which means there has been a failure in the OS upgrade. See log at: /var/log/installmacos_{timestamp}.log and /var/log/install.log and /var/log/system.log
 # 11: Insufficient free space on computer.
 # 14: Remote users are logged into computer. Not secure when using FV2 Authenticated Restart.
-# 16: FV2 Status is not Encrypted.
+# 16: FV2 Status is either not Encrypted, in progress or something other than Off.
 # 17: Logged in user is not on the list of the FileVault enabled users.
 # 18: Password mismatch. User may have forgotten their password.
 # 19: FileVault error with fdesetup. Authenticated restart unsuccessful.
@@ -195,30 +195,30 @@ fvAuthRestart (){
     
     # Check to see if the encryption process is complete
     fv_status="$(/usr/bin/fdesetup status)"
-    if grep -q "Encryption in progress" <<< "$fv_status"; then
-        echo "The encryption process is still in progress. Cannot do FV2 authenticated restart."
-        echo "$fv_status"
-        "$jamfHelper" -windowType utility -icon "$filevaulticon" -heading "FileVault Error" -description "$fv_error" -button1 "Exit" -defaultButton 1 &
-        exit 16
-    elif grep -q "FileVault is Off" <<< "$fv_status"; then
-        echo "Encryption is not active. Cannot do FV2 authenticated restart."
-        echo "$fv_status"
-        "$jamfHelper" -windowType utility -icon "$filevaulticon" -heading "FileVault Error" -description "$fv_error" -button1 "Exit" -defaultButton 1 &
-        exit 16
-    elif ! grep -q "FileVault is On" <<< "$fv_status"; then
-        echo "Unable to determine encryption status. Cannot do FV2 authenticated restart."
-        echo "$fv_status"
-        "$jamfHelper" -windowType utility -icon "$filevaulticon" -heading "FileVault Error" -description "$fv_error" -button1 "Exit" -defaultButton 1 &
-        exit 16
-    fi
     
     # Write out FileVault status
     echo "FileVault Status: $fv_status"
     
-    # Get the logged in user's name
-    logged_in_user="$(/usr/sbin/scutil <<< "show State:/Users/ConsoleUser" | /usr/bin/awk '/Name :/ && ! /loginwindow/ { print $3 }')"
+    if grep -q "Encryption in progress" <<< "$fv_status"; then
+        echo "The encryption process is still in progress. Cannot do FV2 authenticated restart."
+        "$jamfHelper" -windowType utility -icon "$filevaulticon" -heading "FileVault Error" -description "$fv_error" -button1 "Exit" -defaultButton 1 &
+        exit 16
+    elif grep -q "FileVault is Off" <<< "$fv_status"; then
+        echo "Encryption is not active. Cannot do FV2 authenticated restart. Proceeding with script."
+        return 0
+    elif ! grep -q "FileVault is On" <<< "$fv_status"; then
+        echo "Unable to determine encryption status. Cannot do FV2 authenticated restart."
+        "$jamfHelper" -windowType utility -icon "$filevaulticon" -heading "FileVault Error" -description "$fv_error" -button1 "Exit" -defaultButton 1 &
+        exit 16
+    fi
     
-    # Check sees if the logged in account is an authorized FileVault 2 user
+    # Check if user is logged in
+    if [[ -z "$logged_in_user" ]]; then
+        echo "No user is logged in. Cannot do FV2 authenticated restart. Proceeding with script."
+        return 0
+    fi
+    
+    # Check if the logged in account is an authorized FileVault 2 user
     fv_users="$(/usr/bin/fdesetup list)"
     if ! /usr/bin/egrep -q "^${logged_in_user}," <<< "$fv_users"; then
         echo "$logged_in_user is not on the list of FileVault enabled users:"
@@ -293,14 +293,14 @@ EOF
 )"
     
     # Test success conditions.
-    FDESETUP_RESULT=$?
+    fdesetup_result=$?
     
     # Clear password variable.
     unset user_pw
     
-    if [[ $FDESETUP_RESULT -ne 0 ]]; then
+    if [[ $fdesetup_result -ne 0 ]]; then
         echo "$FDESETUP_OUTPUT"
-        echo "[WARNING] fdesetup exited with return code: $FDESETUP_RESULT."
+        echo "[WARNING] fdesetup exited with return code: $fdesetup_result."
         echo "See this page for a list of fdesetup exit codes and their meaning:"
         echo "https://developer.apple.com/legacy/library/documentation/Darwin/Reference/ManPages/man8/fdesetup.8.html"
         exit 19
@@ -552,7 +552,7 @@ validateAppExpirationDate (){
     fi
     
     # Loop through all codesign files
-    for code in $(/usr/bin/find . -iname codesign\*); do
+    for code in $(/usr/bin/find "$temp_path" -iname codesign\* -mindepth 1); do
         # Analyze expiration date of certificate
         # Format of date e.g.: Apr 12 22:34:35 2021 GMT
         # Variable to extract expiration date
