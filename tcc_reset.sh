@@ -14,6 +14,7 @@
 # Hopefully it continues to work in future OS versions
 #
 # Original inspiration: https://gist.github.com/haircut/aeb22c853b0ae4b483a76320ccc8c8e9
+# Why? Because no one knows what Python's future on macOS is.
 
 
 # Determine macOS major version
