@@ -78,7 +78,7 @@ custom_trigger_policy_name="${6}"
 add_install_pkg="${7}"
 min_os_app_ver="${8}"
 it_contact="${9}"
-app_name="$(echo "$mac_os_installer_path" | /usr/bin/awk '{ gsub(/.*Install (macOS |Mac OS X |OS X )/,""); gsub(/.app/,""); print $0}')"
+app_name="$(echo "$mac_os_installer_path" | /usr/bin/awk '{ gsub(/.*Install /,""); gsub(/.app/,""); print $0}')"
 #mac_os_install_ver="$(/usr/bin/defaults read "$mac_os_installer_path"/Contents/Info.plist CFBundleShortVersionString)"
 
 # Path to various icons used with JAMF Helper
