@@ -566,7 +566,13 @@ validateAppExpirationDate (){
             "$jamfHelper" -windowType utility -icon "$alerticon" -heading "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
             exit 23
         fi
+        
+        # Delete codesign file
+        /bin/rm -f "$code"
     done
+    
+    echo "Certificates for the application $mac_os_installer_path are valid."
+    echo "Proceeding to check certificates of packages inside InstallESD.dmg"
     
     # Potential statuses given by pkgutil --check-signature
     # Not all of these are checked against but leaving here for documentation purposes
@@ -577,12 +583,19 @@ validateAppExpirationDate (){
     unsigned_pkgutil="Status: no signature"
     
     # Mount volume
-    /usr/bin/hdiutil attach -nobrowse -quiet "$mac_os_installer_path"/Contents/SharedSupport/InstallESD.dmg -
+    /usr/bin/hdiutil attach -nobrowse -quiet "$mac_os_installer_path"/Contents/SharedSupport/InstallESD.dmg
     
     # Ensure DMG mounted successfully
-    if [[ "$exit_status" != 0 ]]; then
+    if [[ "$?" != 0 ]]; then
         echo "Unable to mount "$mac_os_installer_path"/Contents/SharedSupport/InstallESD.dmg to validate certificate."
         echo "Will proceed without validating contents of "$mac_os_installer_path"/Contents/SharedSupport/InstallESD.dmg."
+        
+        # Remove temporary working path
+        /bin/rm -rf "$temp_path"
+        
+        # Return back to previous current directory
+        /usr/bin/cd "$current_dir"
+        
         return 1
     fi
     
@@ -621,6 +634,14 @@ validateAppExpirationDate (){
         pkg_status="$(/usr/sbin/pkgutil --check-signature "$pkg" | /usr/bin/awk '/Status:/{gsub(/   /,""); print $0}')"
         if [[ "$pkg_status" == "$expired_pkgutil" ]]; then
             echo "$pkg has expired. Please download a new macOS installer with a valid certificate."
+            
+            # Remove temporary working path
+            /bin/rm -rf "$temp_path"
+            
+            # Return back to previous current directory
+            /usr/bin/cd "$current_dir"
+            
+            "$jamfHelper" -windowType utility -icon "$alerticon" -heading "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
             exit 24
         fi
     done
