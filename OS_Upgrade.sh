@@ -128,7 +128,7 @@ cs_error="An unexpected error with CoreStorage has occurred. Please contact $it_
 checkParam (){
 if [[ -z "$1" ]]; then
     echo "\$$2 is empty and required. Please fill in the JSS parameter correctly."
-    "$jamfHelper" -windowType utility -icon "$alerticon" -heading "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+    "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
     exit 1
 fi
 }
@@ -137,7 +137,7 @@ checkPowerSource (){
 # Check for Power Source
 if [[ "$power_source" = "Now drawing from 'Battery Power'" ]] || [[ "$power_source" != *"AC Power"* ]]; then
     echo "$no_ac_power"
-    "$jamfHelper" -windowType utility -icon "$lowbatteryicon" -heading "Connect to Power Source" -description "$no_ac_power" -button1 "Exit" -defaultButton 1 &
+    "$jamfHelper" -windowType utility -icon "$lowbatteryicon" -title "Connect to Power Source" -description "$no_ac_power" -button1 "Exit" -defaultButton 1 &
     exit 4
 else
     echo "Power source connected to computer."
@@ -183,7 +183,7 @@ fvAuthRestart (){
     REMOTE_USERS=$(/usr/bin/who | /usr/bin/grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | /usr/bin/wc -l)
     if [[ $REMOTE_USERS -gt 0 ]]; then
         echo "Remote users are logged in. Cannot complete."
-        "$jamfHelper" -windowType utility -icon "$filevaulticon" -heading "FileVault Error" -description "$fv_error" -button1 "Exit" -defaultButton 1 &
+        "$jamfHelper" -windowType utility -icon "$filevaulticon" -title "FileVault Error" -description "$fv_error" -button1 "Exit" -defaultButton 1 &
         exit 14
     fi
     
@@ -201,14 +201,14 @@ fvAuthRestart (){
     
     if grep -q "Encryption in progress" <<< "$fv_status"; then
         echo "The encryption process is still in progress. Cannot do FV2 authenticated restart."
-        "$jamfHelper" -windowType utility -icon "$filevaulticon" -heading "FileVault Error" -description "$fv_error" -button1 "Exit" -defaultButton 1 &
+        "$jamfHelper" -windowType utility -icon "$filevaulticon" -title "FileVault Error" -description "$fv_error" -button1 "Exit" -defaultButton 1 &
         exit 16
     elif grep -q "FileVault is Off" <<< "$fv_status"; then
         echo "Encryption is not active. Cannot do FV2 authenticated restart. Proceeding with script."
         return 0
     elif ! grep -q "FileVault is On" <<< "$fv_status"; then
         echo "Unable to determine encryption status. Cannot do FV2 authenticated restart."
-        "$jamfHelper" -windowType utility -icon "$filevaulticon" -heading "FileVault Error" -description "$fv_error" -button1 "Exit" -defaultButton 1 &
+        "$jamfHelper" -windowType utility -icon "$filevaulticon" -title "FileVault Error" -description "$fv_error" -button1 "Exit" -defaultButton 1 &
         exit 16
     fi
     
@@ -223,7 +223,7 @@ fvAuthRestart (){
     if ! /usr/bin/egrep -q "^${logged_in_user}," <<< "$fv_users"; then
         echo "$logged_in_user is not on the list of FileVault enabled users:"
         echo "$fv_users"
-        "$jamfHelper" -windowType utility -icon "$filevaulticon" -heading "FileVault Error" -description "$fv_error" -button1 "Exit" -defaultButton 1 -timeout 60 &
+        "$jamfHelper" -windowType utility -icon "$filevaulticon" -title "FileVault Error" -description "$fv_error" -button1 "Exit" -defaultButton 1 -timeout 60 &
         exit 17
     fi
     
@@ -232,7 +232,7 @@ fvAuthRestart (){
     if [[ "$(/usr/bin/fdesetup supportsauthrestart)" != "true" ]] || [[ "$os_major_ver" -lt 12 ]]; then
         echo "Either FileVault authenticated restart is not supported on this Mac or the OS is older than 10.12. Skipping FV authenticated restart."
         echo "User may need to authenticate on reboot. Letting them know via JamfHelper prompt."
-        "$jamfHelper" -windowType utility -icon "$filevaulticon" -heading "FileVault Notice" -description "$fv_proceed" -button1 "Continue" -defaultButton 1 -timeout 60 &
+        "$jamfHelper" -windowType utility -icon "$filevaulticon" -title "FileVault Notice" -description "$fv_proceed" -button1 "Continue" -defaultButton 1 -timeout 60 &
         return 1
     fi
     
@@ -264,7 +264,7 @@ fvAuthRestart (){
         user_pw="$(/bin/launchctl "$l_method" "$l_id" /usr/bin/osascript -e 'display dialog "Sorry, that password was incorrect. Please try again:" default answer "" with title "FileVault Authentication Restart" giving up after 86400 with text buttons {"OK"} default button 1 with hidden answer with icon file "'"${filevaulticon_as//\"/\\\"}"'"' -e 'return text returned of result')"
         if (( TRY >= 5 )); then
             echo "Password prompt unsuccessful after 5 attempts."
-            "$jamfHelper" -windowType utility -icon "$filevaulticon" -heading "FileVault Authentication Error" -description "$forgot_password" -button1 "Exit" -defaultButton 1 &
+            "$jamfHelper" -windowType utility -icon "$filevaulticon" -title "FileVault Authentication Error" -description "$forgot_password" -button1 "Exit" -defaultButton 1 &
             exit 18
         fi
     done
@@ -318,7 +318,7 @@ downloadOSInstaller (){
     "$jamf" recon
     
     if [[ -n "$custom_trigger_policy_name" ]]; then
-        "$jamfHelper" -windowType hud -lockhud -heading "$app_name (1 of 2)" -description "$adequate_free_space_for_install_dialog" -icon "$downloadicon" &
+        "$jamfHelper" -windowType hud -lockhud -title "$app_name (1 of 2)" -description "$adequate_free_space_for_install_dialog" -icon "$downloadicon" &
         JHPID=$(echo "$!")
         
         "$jamf" policy -event "$custom_trigger_policy_name" -randomDelaySeconds 0
@@ -343,7 +343,7 @@ checkOSInstaller (){
         
         # Final check to see if macOS installer app is on computer
         if [[ ! -e "$mac_os_installer_path/Contents/SharedSupport/InstallESD.dmg" ]] || [[ ! -e "$mac_os_installer_path/Contents/Resources/startosinstall" ]]; then
-            "$jamfHelper" -windowType utility -icon "$alerticon" -heading "Download Failure" -description "$download_error" -button1 "Exit" -defaultButton 1 &
+            "$jamfHelper" -windowType utility -icon "$alerticon" -title "Download Failure" -description "$download_error" -button1 "Exit" -defaultButton 1 &
             exit 5
         fi
         
@@ -363,7 +363,7 @@ checkCSConversionState (){
     
     if [[ "$(/usr/sbin/diskutil cs info / | /usr/bin/awk '/Conversion State:/ { print $3 }')" = "Converting" ]]; then
         echo "CoreStorage Conversion is in the middle of converting. macOS installer will fail in this state. Stopping upgrade."
-        "$jamfHelper" -windowType utility -icon "$alerticon" -heading "Error" -description "$cs_error" -button1 "Exit" -defaultButton 1 &
+        "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$cs_error" -button1 "Exit" -defaultButton 1 &
         exit 21
     fi
 }
@@ -381,7 +381,7 @@ checkForMountedInstallESD (){
         /usr/bin/hdiutil detach -force "$vol_name"
         if [[ $? != 0 ]]; then
             echo "Failed to unmount $vol_name"
-            "$jamfHelper" -windowType utility -icon "$alerticon" -heading "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+            "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
             exit 22
         fi
     fi
@@ -394,7 +394,7 @@ checkForFreeSpace (){
     # Check for to make sure free disk space required is a positive integer
     if [[ ! "$needed_free_space" =~ ^[0-9]+$ ]]; then
         echo "Enter a positive integer value (no decimals) for free disk space required."
-        "$jamfHelper" -windowType utility -icon "$alerticon" -heading "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+        "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
         exit 7
     fi
     
@@ -404,7 +404,7 @@ checkForFreeSpace (){
     # 2) the installer is on disk but there is not enough space for what the installer needs to proceed
     if [[ "$available_free_space" -lt 25 ]] || [[ "$available_free_space" -lt "$needed_free_space" ]]; then
         echo "$insufficient_free_space_for_install_dialog"
-        "$jamfHelper" -windowType utility -icon "$driveicon" -heading "Insufficient Free Space" -description "$insufficient_free_space_for_install_dialog" -button1 "Exit" -defaultButton 1 &
+        "$jamfHelper" -windowType utility -icon "$driveicon" -title "Insufficient Free Space" -description "$insufficient_free_space_for_install_dialog" -button1 "Exit" -defaultButton 1 &
         exit 11
     else
         echo "$available_free_space gigabytes found as free space on boot drive. Proceeding with install."
@@ -436,16 +436,16 @@ checkMinReqOSValue (){
         if [[ "$min_req_os" =~ ^[0-9]+[\.]{1}[0-9]+[\.]{0,1}[0-9]*$ ]]; then
             if [[ "$os_major_ver" -lt "$min_req_os_maj" ]]; then
                 echo "Unsupported Operating System. Cannot upgrade 10.$os_major_ver.$os_minor_ver to $min_req_os"
-                "$jamfHelper" -windowType utility -icon "$alerticon" -heading "Unsupported OS" -description "$bad_os" -button1 "Exit" -defaultButton 1
+                "$jamfHelper" -windowType utility -icon "$alerticon" -title "Unsupported OS" -description "$bad_os" -button1 "Exit" -defaultButton 1
                 exit 2
             elif [[ "$os_major_ver" -eq "$min_req_os_maj" ]] && [[ "$os_minor_ver" -lt "$min_req_os_min" ]]; then
                 echo "Unsupported Operating System. Cannot upgrade 10.$os_major_ver.$os_minor_ver to $min_req_os"
-                "$jamfHelper" -windowType utility -icon "$alerticon" -heading "Unsupported OS" -description "$bad_os" -button1 "Exit" -defaultButton 1
+                "$jamfHelper" -windowType utility -icon "$alerticon" -title "Unsupported OS" -description "$bad_os" -button1 "Exit" -defaultButton 1
                 exit 2
             fi
         else
             echo "Invalid Minimum OS version value."
-            "$jamfHelper" -windowType utility -icon "$alerticon" -heading "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+            "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
             exit 3
         fi
     else
@@ -473,7 +473,7 @@ minOSReqCheck (){
                         echo "Looks like the download attempt failed."
                         echo "Minimum required macOS installer app version is still greater than the version on the client."
                         echo "Please install the macOS installer app version that meets the minimum requirement set."
-                        "$jamfHelper" -windowType utility -icon "$alerticon" -heading "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+                        "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
                         exit 8
                     fi
                 fi
@@ -482,7 +482,7 @@ minOSReqCheck (){
             fi
         else
             echo "Invalid Minimum OS version value."
-            "$jamfHelper" -windowType utility -icon "$alerticon" -heading "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+            "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
             exit 3
         fi
     fi
@@ -539,7 +539,7 @@ validateAppExpirationDate (){
     current_time="$(/bin/date +%s)"
     temp_path="/tmp/codesign_$current_time"
     /bin/mkdir -p "$temp_path"
-    /usr/bin/cd "$temp_path"
+    cd "$temp_path"
     
     # Extract certificates from app bundle
     /usr/bin/codesign -dvvvv --extract-certificates "$mac_os_installer_path"
@@ -559,11 +559,11 @@ validateAppExpirationDate (){
         expiration_date_string=$(/usr/bin/openssl x509 -enddate -noout -inform DER -in "$code" | /usr/bin/awk -F'=' '{print $2}' | /usr/bin/tr -s ' ')
         
         # Variable to convert expiration date string into epoch seconds
-        expiration_date_epoch=$(/bin/date -jf "%b %d %H:%M:%S %Y %Z" "expiration_date_string" +"%s")
+        expiration_date_epoch=$(/bin/date -jf "%b %d %H:%M:%S %Y %Z" "$expiration_date_string" +"%s")
         
         if [[ $expiration_date_epoch -lt $current_time ]]; then
             echo "A certificate for the installer application $mac_os_installer_path has expired. Please download a new macOS installer app with a valid certificate."
-            "$jamfHelper" -windowType utility -icon "$alerticon" -heading "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+            "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
             exit 23
         fi
         
@@ -594,7 +594,7 @@ validateAppExpirationDate (){
         /bin/rm -rf "$temp_path"
         
         # Return back to previous current directory
-        /usr/bin/cd "$current_dir"
+        cd "$current_dir"
         
         return 1
     fi
@@ -639,9 +639,9 @@ validateAppExpirationDate (){
             /bin/rm -rf "$temp_path"
             
             # Return back to previous current directory
-            /usr/bin/cd "$current_dir"
+            cd "$current_dir"
             
-            "$jamfHelper" -windowType utility -icon "$alerticon" -heading "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+            "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
             exit 24
         fi
     done
@@ -655,7 +655,7 @@ validateAppExpirationDate (){
     /bin/rm -rf "$temp_path"
     
     # Return back to previous current directory
-    /usr/bin/cd "$current_dir"
+    cd "$current_dir"
 }
 
 
@@ -726,7 +726,7 @@ installOS (){
     fvAuthRestart
     
     # Update message letting end-user know upgrade is going to start.
-    "$jamfHelper" -windowType hud -lockhud -heading "$app_name $1" -description "$inprogress" -icon "$mas_os_icon" &
+    "$jamfHelper" -windowType hud -lockhud -title "$app_name $1" -description "$inprogress" -icon "$mas_os_icon" &
     
     # Get the Process ID of the last command
     JHPID=$(echo "$!")
@@ -742,14 +742,14 @@ installOS (){
     if [[ "$(/usr/bin/tail -n 1 $log | /usr/bin/cut -d : -f 2)" != 0 ]] && [[ "$(/usr/bin/tail -n 1 $log | /usr/bin/cut -d : -f 2)" != 255 ]]; then
         /bin/kill -s KILL "$JHPID" > /dev/null 1>&2
         echo "startosinstall did not succeed. See log at: $log and /var/log/install.log and /var/log/system.log"
-        "$jamfHelper" -windowType utility -icon "$alerticon" -heading "Installation Failure" -description "$upgrade_error" -button1 "Exit" -defaultButton 1 &
+        "$jamfHelper" -windowType utility -icon "$alerticon" -title "Installation Failure" -description "$upgrade_error" -button1 "Exit" -defaultButton 1 &
         exit 9
     fi
     
     if [[ "$(/usr/bin/tail -n 2 $log | /usr/bin/head -n 1)" = "An error occurred installing macOS." ]] || [[ "$(/usr/bin/tail -n 2 $log | /usr/bin/head -n 1)" = "Helper tool crashed..." ]]; then
         /bin/kill -s KILL "$JHPID" > /dev/null 1>&2
         echo "startosinstall did not succeed. See log at: $log and /var/log/install.log and /var/log/system.log"
-        "$jamfHelper" -windowType utility -icon "$alerticon" -heading "Installation Failure" -description "$upgrade_error" -button1 "Exit" -defaultButton 1 &
+        "$jamfHelper" -windowType utility -icon "$alerticon" -title "Installation Failure" -description "$upgrade_error" -button1 "Exit" -defaultButton 1 &
         exit 9
     fi
     
@@ -825,7 +825,7 @@ createReconAfterUpgradeLaunchDaemon (){
     # This launch daemon will self-delete after successfully completing a Jamf recon
     # Launch Daemon Label and Path
     local launch_daemon="com.custom.postinstall.jamfrecon"
-    local launch_daemon_path="$3/Library/LaunchDaemons/$launch_daemon".plist
+    local launch_daemon_path="/Library/LaunchDaemons/$launch_daemon".plist
     
     # Creating launch daemon
     echo "<?xml version="1.0" encoding="UTF-8"?>
