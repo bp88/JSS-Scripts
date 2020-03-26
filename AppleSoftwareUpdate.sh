@@ -183,7 +183,7 @@ powerCheck (){
 
 updateCLI (){
     # Install all software updates
-    /usr/sbin/softwareupdate -ia 2>&1 >> "$ListOfSoftwareUpdates" &
+    /usr/sbin/softwareupdate -ia --verbose 1>> "$ListOfSoftwareUpdates" 2>> "$ListOfSoftwareUpdates" &
     
     ## Get the Process ID of the last command run in the background ($!) and wait for it to complete (wait)
     # If you don't wait, the computer may take a restart action before updates are finished
@@ -230,9 +230,9 @@ updateRestartAction (){
 updateGUI (){
     # Update through the GUI
     if [[ "$OSMajorVersion" -ge 14 ]]; then
-        /usr/bin/open "/System/Library/CoreServices/Software Update.app"
+        /bin/launchctl $LMethod $LID /usr/bin/open "/System/Library/CoreServices/Software Update.app"
     elif [[ "$OSMajorVersion" -ge 8 ]] && [[ "$OSMajorVersion" -le 13 ]]; then
-        /usr/bin/open macappstore://showUpdatesPage
+        /bin/launchctl $LMethod $LID /usr/bin/open macappstore://showUpdatesPage
     fi
 }
 
@@ -272,6 +272,7 @@ runUpdates (){
     exit 0
 }
 
+
 # Function to do best effort check if using presentation or web conferencing is active
 checkForDisplaySleepAssertions() {
     Assertions="$(/usr/bin/pmset -g assertions | /usr/bin/awk '/NoDisplaySleepAssertion | PreventUserIdleDisplaySleep/ && match($0,/\(.+\)/) && ! /coreaudiod/ {gsub(/^\ +/,"",$0); print};')"
@@ -304,6 +305,18 @@ SEPType="$(/usr/sbin/system_profiler SPiBridgeDataType | /usr/bin/awk -F: '/Mode
 
 # Determine currently logged in user
 LoggedInUser="$(/usr/sbin/scutil <<< "show State:/Users/ConsoleUser" | /usr/bin/awk '/Name :/ && ! /loginwindow/ { print $3 }')"
+
+# Determine logged in user's UID
+LoggedInUserID=$(/usr/bin/id -u "$LoggedInUser")
+
+# Determine launchctl method we will need to use to launch osascript under user context
+if [[ "$OSMajorVersion" -le 9 ]]; then
+    LID=$(/usr/bin/pgrep -x -u "$LoggedInUserID" loginwindow)
+    LMethod="bsexec"
+else
+    LID=$LoggedInUserID
+    LMethod="asuser"
+fi
 
 # Let's make sure FileVault isn't encrypting before proceeding any further
 fvStatusCheck
@@ -342,6 +355,7 @@ else
             
             exit 0
         else
+            powerCheck
             HELPER=$("$jamfHelper" -windowType utility -icon "$AppleSUIcon" -title "Apple Software Update" -description "$ForcedUpdatePrompt" -button1 "Update" -defaultButton 1 -timeout "$TimeOutinSec" -countdown -alignCountdown "right")
             echo "Jamf Helper Exit Code: $HELPER"
             # If they click Install Updates then run the updates
