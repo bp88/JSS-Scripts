@@ -21,6 +21,7 @@
 # Parameter 5: Optional. Number of seconds dialog should remain up. Default: 900 seconds
 # Parameter 6: Optional. Contact email, number, or department name used in messaging.
 #              Default: IT
+# Parameter 7: Optional. Set your own custom icon. Default is Apple Software Update icon.
 #
 # Here is the expected workflow with this script:
 # If no user is logged in, the script will install updates through the command line and
@@ -35,6 +36,7 @@
 # 12: Software Update failed.
 # 13: FV encryption is still in progress.
 # 14: Incorrect deferral type used.
+# 15: Insufficient space to perform update.
 
 # Potential feature improvement
 # Allow user to postpone to a specific time with a popup menu of available times
@@ -88,10 +90,11 @@ DeferralType="count"
 DeferralValue="${4}"
 TimeOutinSec="${5}"
 ITContact="${6}"
+AppleSUIcon="${7}"
 
 # Set default values
 [[ -z "$DeferralValue" ]] && DeferralValue=3
-[[ -z "$DeferralValue" ]] && TimeOutinSec="900"
+[[ -z "$TimeOutinSec" ]] && TimeOutinSec="900"
 [[ -z "$ITContact" ]] && ITContact="IT"
 
 CurrentDeferralValue="$(/usr/libexec/PlistBuddy -c "print :"$BundleID":count" "$DeferralPlist" 2>/dev/null)"
@@ -108,16 +111,21 @@ jamf="/usr/local/bin/jamf"
 # Path to temporarily store list of software updates. Avoids having to re-run the softwareupdate command multiple times.
 ListOfSoftwareUpdates="/tmp/ListOfSoftwareUpdates"
 
-#  Set appropriate Software Update icon depending on OS version
-if [[ "$OSMajorVersion" -gt 13 ]]; then
-    AppleSUIcon="/System/Library/CoreServices/Software Update.app/Contents/Resources/SoftwareUpdate.icns"
-elif [[ "$OSMajorVersion" -eq 13 ]]; then
-    AppleSUIcon="/System/Library/CoreServices/Install Command Line Developer Tools.app/Contents/Resources/SoftwareUpdate.icns"
-elif [[ "$OSMajorVersion" -ge 8 ]] && [[ "$OSMajorVersion" -le 12 ]]; then
-    AppleSUIcon="/System/Library/CoreServices/Software Update.app/Contents/Resources/SoftwareUpdate.icns"
-elif [[ "$OSMajorVersion" -lt 8 ]]; then
-    AppleSUIcon="/System/Library/CoreServices/Software Update.app/Contents/Resources/Software Update.icns"
+# If non-existent path has been supplied, set appropriate Software Update icon depending on OS version
+if [[ ! -e "$AppleSUIcon" ]]; then
+    if [[ "$OSMajorVersion" -gt 13 ]]; then
+        AppleSUIcon="/System/Library/CoreServices/Software Update.app/Contents/Resources/SoftwareUpdate.icns"
+    elif [[ "$OSMajorVersion" -eq 13 ]]; then
+        AppleSUIcon="/System/Library/CoreServices/Install Command Line Developer Tools.app/Contents/Resources/SoftwareUpdate.icns"
+    elif [[ "$OSMajorVersion" -ge 8 ]] && [[ "$OSMajorVersion" -le 12 ]]; then
+        AppleSUIcon="/System/Library/CoreServices/Software Update.app/Contents/Resources/SoftwareUpdate.icns"
+    elif [[ "$OSMajorVersion" -lt 8 ]]; then
+        AppleSUIcon="/System/Library/CoreServices/Software Update.app/Contents/Resources/Software Update.icns"
+    fi
 fi
+
+# Path to the alert caution icon
+AlertIcon="/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/AlertCautionIcon.icns"
 
 ## Verbiage For Messages ##
 # Message to guide user to Software Update process
@@ -139,7 +147,7 @@ ContactMsg="There seems to have been an error installing the updates. You can tr
 If the error persists, please contact $ITContact."
 
 # Message to display when computer is running off battery
-no_ac_power="The computer is currently running off battery and is not plugged into a power source."
+NoACPower="The computer is currently running off battery and is not plugged into a power source."
 
 # Standard Update Message
 StandardUpdatePrompt="There is an OS update available for your Mac. Please click Continue to proceed to Software Update to run this update. If you are unable to start the process at this time, you may choose to postpone by one day.
@@ -158,9 +166,13 @@ HUDMessage="Please save your work and quit all other applications. macOS softwar
 
 This message will go away when updates are complete and closing it will not stop the update process.
 
-If you feel too much time has passed, please contact $ITContact
+If you feel too much time has passed, please contact $ITContact.
 
 "
+#Out of Space Message
+NoSpacePrompt="Please clear up some space by deleting files and then attempt to do the update $SUGuide.
+
+If this error persists, please contact $ITContact."
 
 ## Functions ##
 powerCheck (){
@@ -170,7 +182,7 @@ powerCheck (){
     # Let's wait 5 minutes to see if computer gets plugged into power.
     for (( i = 1; i <= 5; ++i )); do
         if [[ "$(/usr/bin/pmset -g ps | /usr/bin/grep "Battery Power")" = "Now drawing from 'Battery Power'" ]] && [[ $i = 5 ]]; then
-            echo "$no_ac_power"
+            echo "$NoACPower"
         elif [[ "$(/usr/bin/pmset -g ps | /usr/bin/grep "Battery Power")" = "Now drawing from 'Battery Power'" ]]; then
             /bin/sleep 60
         else
@@ -260,13 +272,26 @@ runUpdates (){
     ## Kill the jamfHelper. If a restart is needed, the user will be prompted. If not the hud will just go away
     /bin/kill -s KILL "$JHPID" &>/dev/null
     
+    # softwareupdate does not exit with error when insufficient space is detected
+    # which is why we need to get ahead of that error
+    if [[ "$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep -E "Not enough free disk space")" ]]; then
+        SpaceError=$(echo "$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep -E "Not enough free disk space" | /usr/bin/tail -n 1)")
+        AvailableFreeSpace=$(/bin/df -g / | /usr/bin/awk '(NR == 2){print $4}')
+        
+        echo "$SpaceError"
+        echo "Disk has $AvailableFreeSpace GB of free space."
+        
+        "$jamfHelper" -windowType utility -icon "$AlertIcon" -title "Apple Software Update Error" -description "$SpaceError Your disk has $AvailableFreeSpace GB of free space. $NoSpacePrompt" -button1 "OK" &
+        return 15
+    fi
+    
     if [[ "$SU_EC" -eq 0 ]]; then
         updateRestartAction
     else
         echo "/usr/bin/softwareupdate failed. Exit Code: $SU_EC"
         
-        "$jamfHelper" -windowType utility -icon "$AppleSUIcon" -title "Apple Software Updates" -description "$ContactMsg" -button1 "OK"
-        exit 12
+        "$jamfHelper" -windowType utility -icon "$AppleSUIcon" -title "Apple Software Update" -description "$ContactMsg" -button1 "OK" &
+        return 12
     fi
     
     exit 0
@@ -345,7 +370,7 @@ else
             setDeferral "$BundleID" "$DeferralType" "$CurrTimer" "$DeferralPlist"
             
             # If someone is logged in and they have not canceled $DeferralValue times already, prompt them to install updates that require a restart and state how many more times they can press 'cancel' before updates run automatically.
-            HELPER=$("$jamfHelper" -windowType utility -icon "$AppleSUIcon" -title "Apple Software Updates" -description "$StandardUpdatePrompt" -button1 "Continue" -button2 "Postpone" -cancelButton "2" -defaultButton 2 -timeout "$TimeOutinSec")
+            HELPER=$("$jamfHelper" -windowType utility -icon "$AppleSUIcon" -title "Apple Software Update" -description "$StandardUpdatePrompt" -button1 "Continue" -button2 "Postpone" -cancelButton "2" -defaultButton 2 -timeout "$TimeOutinSec")
             echo "Jamf Helper Exit Code: $HELPER"
             
             # If they click "Update" then take them to the software update preference pane
@@ -358,11 +383,16 @@ else
             powerCheck
             HELPER=$("$jamfHelper" -windowType utility -icon "$AppleSUIcon" -title "Apple Software Update" -description "$ForcedUpdatePrompt" -button1 "Update" -defaultButton 1 -timeout "$TimeOutinSec" -countdown -alignCountdown "right")
             echo "Jamf Helper Exit Code: $HELPER"
-            # If they click Install Updates then run the updates
-            # Looks like someone tried to quit jamfHelper or the jamfHelper screen timed out
+            # Either they clicked "Updates" or
+            # Someone tried to quit jamfHelper or the jamfHelper screen timed out
             # The Timer is already 0, run the updates automatically, the end user has been warned!
             if [[ "$HELPER" -eq "0" ]] || [[ "$HELPER" -eq "239" ]]; then
                 runUpdates
+                RunUpdates_EC=$?
+                
+                if [[ $RunUpdates_EC -ne 0 ]]; then
+                    exit $RunUpdates_EC
+                fi
             fi
         fi
     fi
