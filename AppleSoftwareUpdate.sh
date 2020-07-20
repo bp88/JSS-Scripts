@@ -136,7 +136,7 @@ if [[ "$OSMajorVersion" -ge 14 ]]; then
  > System Preferences > Software Update"
 else
     #SUGuide="by opening up the App Store located in the Applications folder and clicking on the Updates tab to install any available updates."
-    SUIGuide="by navigating to:
+    SUGuide="by navigating to:
 
  > App Store > Updates tab"
 fi
