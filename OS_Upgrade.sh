@@ -47,6 +47,7 @@
 # 3: Invalid OS version value. Must be in form of 10.12.4
 # 4: No power source connected.
 # 5: macOS Installer app is missing "InstallESD.dmg" & "startosinstall". Due to 1) bad path has been provided, 2) app is corrupt and missing two big components, or 3) app is not installed.
+# 6: macOS Installer app is missing Info.plist
 # 7: Invalid value provided for free disk space.
 # 8: The minimum OS version required for the macOS installer app version on the client is greater than the macOS installer on the computer.
 # 9: The startosinstall exit code was not 0 or 255 which means there has been a failure in the OS upgrade. See log at: /var/log/installmacos_{timestamp}.log and /var/log/install.log and /var/log/system.log
@@ -61,10 +62,13 @@
 # 22: Failed to unmount InstallESD. InstallESD.dmg may be mounted by the installer when it is launched through the GUI. However if you quit the GUI InstallAssistant, the app fails to unmount InstallESD which can cause problems on later upgrade attempts.
 # 23: Expired certificate found in macOS installer app
 # 24: Expired certificate found in one of packages inside macOS installer's InstallESD.dmg
+# 25: Could not determine plist value.
+# 26: Could not determine OS version in the app installer's base image.
 
 # Variables to determine paths, OS version, disk space, and power connection. Do not edit.
-os_major_ver="$(/usr/bin/sw_vers -productVersion | /usr/bin/cut -d . -f 2)"
-os_minor_ver="$(/usr/bin/sw_vers -productVersion | /usr/bin/cut -d . -f 3)"
+os_major_ver="$(/usr/bin/sw_vers -productVersion | /usr/bin/cut -d . -f 1)"
+os_minor_ver="$(/usr/bin/sw_vers -productVersion | /usr/bin/cut -d . -f 2)"
+os_patch_ver="$(/usr/bin/sw_vers -productVersion | /usr/bin/cut -d . -f 3)"
 jamfHelper="/Library/Application Support/JAMF/bin/jamfHelper.app/Contents/MacOS/jamfHelper"
 jamf="/usr/local/bin/jamf"
 power_source=$(/usr/bin/pmset -g ps | /usr/bin/grep "Power")
@@ -76,7 +80,7 @@ mac_os_installer_path="${4}"
 time="${5}"
 custom_trigger_policy_name="${6}"
 add_install_pkg="${7}"
-min_os_app_ver="${8}"
+approved_min_os_app_ver="${8}"
 it_contact="${9}"
 app_name="$(echo "$mac_os_installer_path" | /usr/bin/awk '{ gsub(/.*Install /,""); gsub(/.app/,""); print $0}')"
 #mac_os_install_ver="$(/usr/bin/defaults read "$mac_os_installer_path"/Contents/Info.plist CFBundleShortVersionString)"
@@ -126,22 +130,22 @@ cs_error="An unexpected error with CoreStorage has occurred. Please contact $it_
 # These are variables that if left unset will break the script and/or result in weird dialog messages.
 # Function requires parameters $1 and $2. $1 is the variable to check and $2 is the variable name.
 checkParam (){
-if [[ -z "$1" ]]; then
-    echo "\$$2 is empty and required. Please fill in the JSS parameter correctly."
-    "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
-    exit 1
-fi
+    if [[ -z "$1" ]]; then
+        echo "\$$2 is empty and required. Please fill in the JSS parameter correctly."
+        "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+        exit 1
+    fi
 }
 
 checkPowerSource (){
-# Check for Power Source
-if [[ "$power_source" = "Now drawing from 'Battery Power'" ]] || [[ "$power_source" != *"AC Power"* ]]; then
-    echo "$no_ac_power"
-    "$jamfHelper" -windowType utility -icon "$lowbatteryicon" -title "Connect to Power Source" -description "$no_ac_power" -button1 "Exit" -defaultButton 1 &
-    exit 4
-else
-    echo "Power source connected to computer."
-fi
+    # Check for Power Source
+    if [[ "$power_source" = "Now drawing from 'Battery Power'" ]] || [[ "$power_source" != *"AC Power"* ]]; then
+        echo "$no_ac_power"
+        "$jamfHelper" -windowType utility -icon "$lowbatteryicon" -title "Connect to Power Source" -description "$no_ac_power" -button1 "Exit" -defaultButton 1 &
+        exit 4
+    else
+        echo "Power source connected to computer."
+    fi
 }
 
 # Function that uses Python's LooseVersion comparison module to compare versions
@@ -174,6 +178,32 @@ compareLooseVersion (){
     fi
     
     echo "False"
+}
+
+checkForPlistValue (){
+    # Pass only 1 value
+    # This function is meant to account for non-standard PlistBuddy behavior when sending output to 2>/dev/null
+    # If path to plist does not exist, output will be: "File Doesn't Exist, Will Create: XXXXXXX"
+    # If plist key does not exist, output will be empty.
+    
+    # Check to make sure only one value has been passed
+    if [[ "$#" -ne 1 ]]; then
+        echo "Pass only 1 value to checkForPlistValue function."
+        "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+        exit 25
+    fi
+    
+    value="${1}"
+    
+    if [[ -z "$value" ]]; then
+        echo "Plistbuddy returned an empty value."
+        "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+        exit 25
+    elif [[ "$value" =~ "File Doesn\'t Exist, Will Create:" ]]; then
+        echo "Plistbuddy is trying to read from a file that does not exist."
+        "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+        exit 25
+    fi
 }
 
 # Function to initiate prompt for FileVault Authenticated Restart
@@ -229,7 +259,7 @@ fvAuthRestart (){
     
     # FileVault authenticated restart was introduced in 10.8.3
     # However prior to 10.12 it does not let you provide a value of "-1" to the option -delayminutes "-1"
-    if [[ "$(/usr/bin/fdesetup supportsauthrestart)" != "true" ]] || [[ "$os_major_ver" -lt 12 ]]; then
+    if [[ "$(/usr/bin/fdesetup supportsauthrestart)" != "true" ]] || [[ "$os_major_ver" -ge 11 || "$os_major_ver" -eq 10 && "$os_minor_ver" -lt 12 ]]; then
         echo "Either FileVault authenticated restart is not supported on this Mac or the OS is older than 10.12. Skipping FV authenticated restart."
         echo "User may need to authenticate on reboot. Letting them know via JamfHelper prompt."
         "$jamfHelper" -windowType utility -icon "$filevaulticon" -title "FileVault Notice" -description "$fv_proceed" -button1 "Continue" -defaultButton 1 -timeout 60 &
@@ -240,10 +270,10 @@ fvAuthRestart (){
     
     # Get information necessary to display messages in the current user's context.
     user_id=$(/usr/bin/id -u "$logged_in_user")
-    if [[ "$os_major_ver" -le 9 ]]; then
+    if [[ "$os_major_ver" -eq 10 && "$os_minor_ver" -le 9 ]]; then
         l_id=$(pgrep -x -u "$user_id" loginwindow)
         l_method="bsexec"
-    elif [[ "$os_major_ver" -gt 9 ]]; then
+    elif [[ "$os_major_ver" -ge 11 || "$os_major_ver" -eq 10 && "$os_minor_ver" -gt 9 ]]; then
         l_id=$user_id
         l_method="asuser"
     fi
@@ -331,23 +361,54 @@ downloadOSInstaller (){
     return 0
 }
 
+redownloadOSInstaller (){
+    echo "Cannot find $mac_os_installer_path. Clearing JAMF Downloads/Waiting Room in case there's a bad download and trying again."
+    /bin/rm -rf "/Library/Application Support/JAMF/Downloads/"
+    /bin/rm -rf "/Library/Application Support/JAMF/Waiting Room/"
+    
+    downloadOSInstaller
+}
+
+checkOSInstallerVersion (){
+    installer_app_ver="$(/usr/libexec/PlistBuddy -c "print :CFBundleShortVersionString" "$mac_os_installer_path"/Contents/Info.plist 2>/dev/null)"
+    
+    if [[ -z "$installer_app_ver" ]]; then
+        "$jamfHelper" -windowType utility -icon "$alerticon" -title "Download Failure" -description "$download_error" -button1 "Exit" -defaultButton 1 &
+        exit 6
+    fi
+    
+    echo "$installer_app_ver"
+}
+
+
 # Function to check macOS installer app has been installed and if not re-download and do a comparison check between OS installer app version required
 checkOSInstaller (){
-    # Not the most accurate check but if the InstallESD.dmg and startosinstall binary are not available chances are the installer is no good.
-    if [[ ! -e "$mac_os_installer_path/Contents/SharedSupport/InstallESD.dmg" ]] || [[ ! -e "$mac_os_installer_path/Contents/Resources/startosinstall" ]]; then
-        echo "Cannot find $mac_os_installer_path. Clearing JAMF Downloads/Waiting Room in case there's a bad download and trying again."
-        /bin/rm -rf "/Library/Application Support/JAMF/Downloads/"
-        /bin/rm -rf "/Library/Application Support/JAMF/Waiting Room/"
-        
-        downloadOSInstaller
-        
-        # Final check to see if macOS installer app is on computer
-        if [[ ! -e "$mac_os_installer_path/Contents/SharedSupport/InstallESD.dmg" ]] || [[ ! -e "$mac_os_installer_path/Contents/Resources/startosinstall" ]]; then
-            "$jamfHelper" -windowType utility -icon "$alerticon" -title "Download Failure" -description "$download_error" -button1 "Exit" -defaultButton 1 &
-            exit 5
+    # Installer structure changed in macOS 11/10.16
+    if [[ "$installer_app_maj_ver" -ge 16 ]]; then
+        # Not the most accurate check but if the SharedSupport.dmg and startosinstall binary are not available chances are the installer is no good.
+        if [[ ! -e "$mac_os_installer_path/Contents/SharedSupport/SharedSupport.dmg" ]] || [[ ! -e "$mac_os_installer_path/Contents/Resources/startosinstall" ]]; then
+            redownloadOSInstaller
+            
+            if [[ ! -e "$mac_os_installer_path/Contents/SharedSupport/SharedSupport.dmg" ]] || [[ ! -e "$mac_os_installer_path/Contents/Resources/startosinstall" ]]; then
+                "$jamfHelper" -windowType utility -icon "$alerticon" -title "Download Failure" -description "$download_error" -button1 "Exit" -defaultButton 1 &
+                exit 5
+            fi
+            
+            return 0
         fi
-        
-        return 0
+    else
+        # Not the most accurate check but if the InstallESD.dmg and startosinstall binary are not available chances are the installer is no good.
+        if [[ ! -e "$mac_os_installer_path/Contents/SharedSupport/InstallESD.dmg" ]] || [[ ! -e "$mac_os_installer_path/Contents/Resources/startosinstall" ]]; then
+            redownloadOSInstaller
+            
+            # Final check to see if macOS installer app is on computer
+            if [[ ! -e "$mac_os_installer_path/Contents/SharedSupport/InstallESD.dmg" ]] || [[ ! -e "$mac_os_installer_path/Contents/Resources/startosinstall" ]]; then
+                "$jamfHelper" -windowType utility -icon "$alerticon" -title "Download Failure" -description "$download_error" -button1 "Exit" -defaultButton 1 &
+                exit 5
+            fi
+            
+            return 0
+        fi
     fi
 }
 
@@ -388,8 +449,11 @@ checkForMountedInstallESD (){
 }
 
 checkForFreeSpace (){
-    # Default value for $needed_free_space to 25GB
+    # Set default value for $needed_free_space to 25GB
     [[ -z "$needed_free_space" ]] && local needed_free_space="25"
+    
+    available_free_space=$(/bin/df -g / | /usr/bin/awk '(NR == 2){print $4}')
+    insufficient_free_space_for_install_dialog="Your boot drive must have $needed_free_space gigabytes of free space available in order to install $app_name. It currently has $available_free_space gigabytes free. Please free up space and try again. If you need assistance, please contact $it_contact."
     
     # Check for to make sure free disk space required is a positive integer
     if [[ ! "$needed_free_space" =~ ^[0-9]+$ ]]; then
@@ -397,8 +461,6 @@ checkForFreeSpace (){
         "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
         exit 7
     fi
-    
-    available_free_space=$(/bin/df -g / | /usr/bin/awk '(NR == 2){print $4}')
     
     # Checking for two conditions: 1) enough space to download the download installer, and
     # 2) the installer is on disk but there is not enough space for what the installer needs to proceed
@@ -429,17 +491,23 @@ deleteInstallAssistantRestartPref (){
     /usr/bin/defaults delete /Library/Preferences/.GlobalPreferences IAQuitInsteadOfReboot
 }
 
-checkMinReqOSValue (){
-    # Check for unsupported OS if a minimum required OS value has been provided. Note: macOS Sierra requires OS 10.7.5 or higher.
+checkMinReqOSVer (){
+    # Check to make sure the computer is running the minimum supported OS as determined by the OS installer. Note: macOS Sierra requires OS 10.7.5 or higher.
     # Also confirm that we are dealing with a valid OS version which is in the form of 10.12.4
     if [[ -n "$min_req_os" ]]; then
         if [[ "$min_req_os" =~ ^[0-9]+[\.]{1}[0-9]+[\.]{0,1}[0-9]*$ ]]; then
             if [[ "$os_major_ver" -lt "$min_req_os_maj" ]]; then
-                echo "Unsupported Operating System. Cannot upgrade 10.$os_major_ver.$os_minor_ver to $min_req_os"
+                echo "Unsupported Operating System. Cannot upgrade $os_major_ver.$os_minor_ver.$os_patch_ver to $min_req_os"
                 "$jamfHelper" -windowType utility -icon "$alerticon" -title "Unsupported OS" -description "$bad_os" -button1 "Exit" -defaultButton 1
                 exit 2
-            elif [[ "$os_major_ver" -eq "$min_req_os_maj" ]] && [[ "$os_minor_ver" -lt "$min_req_os_min" ]]; then
-                echo "Unsupported Operating System. Cannot upgrade 10.$os_major_ver.$os_minor_ver to $min_req_os"
+            fi
+            if [[ "$os_minor_ver" -lt "$min_req_os_min" ]]; then
+                echo "Unsupported Operating System. Cannot upgrade $os_major_ver.$os_minor_ver.$os_patch_ver to $min_req_os"
+                "$jamfHelper" -windowType utility -icon "$alerticon" -title "Unsupported OS" -description "$bad_os" -button1 "Exit" -defaultButton 1
+                exit 2
+            fi
+            if [[ "$os_patch_ver" -lt "$min_req_os_patch" ]]; then
+                echo "Unsupported Operating System. Cannot upgrade $os_major_ver.$os_minor_ver.$os_patch_ver to $min_req_os"
                 "$jamfHelper" -windowType utility -icon "$alerticon" -title "Unsupported OS" -description "$bad_os" -button1 "Exit" -defaultButton 1
                 exit 2
             fi
@@ -454,42 +522,43 @@ checkMinReqOSValue (){
 }
 
 # Function to check if a required minimum macOS app installer has been supplied
-minOSReqCheck (){
+meetsApprovedMinimumOSInstallerVersion (){
     # Check to see if minimum required app installer's OS version has been supplied
-    if [[ -n "$min_os_app_ver" ]]; then
-        if [[ "$min_os_app_ver" =~ ^[0-9]+[\.]{1}[0-9]+[\.]{0,1}[0-9]*$ ]]; then
-            
-            CompareResult="$(compareLooseVersion "$(/usr/libexec/PlistBuddy -c "print :'System Image Info':version" "$mac_os_installer_path"/Contents/SharedSupport/InstallInfo.plist 2>/dev/null)" "$min_os_app_ver")"
-            
-            if [[ "$CompareResult" = "False" ]]; then
-                echo "Minimum required macOS installer app version is greater than the version of the macOS installer on the client."
-                echo "Attempting to download the latest macOS installer."
-                downloadOSInstaller
-                
-                if [[ "$?" = 0 ]]; then
-                    CompareResult="$(compareLooseVersion "$(/usr/libexec/PlistBuddy -c "print :'System Image Info':version" "$mac_os_installer_path"/Contents/SharedSupport/InstallInfo.plist 2>/dev/null)" "$min_os_app_ver")"
-                    
-                    if [[ "$CompareResult" = "False" ]]; then
-                        echo "Looks like the download attempt failed."
-                        echo "Minimum required macOS installer app version is still greater than the version on the client."
-                        echo "Please install the macOS installer app version that meets the minimum requirement set."
-                        "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
-                        exit 8
-                    fi
-                fi
-            elif [[ "$CompareResult" = "True" ]]; then
-                echo "Minimum required macOS installer app version is greater than the version on the client."
-            fi
-        else
-            echo "Invalid Minimum OS version value."
-            "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
-            exit 3
-        fi
+    if [[ -z "$approved_min_os_app_ver" ]]; then
+        echo "Minimum OS app version has not been supplied. Skipping check."
+        
+        return 0
     fi
     
-    echo "Minimum OS app version has not been supplied. Skipping check."
-    
-    return 0
+    if [[ "$approved_min_os_app_ver" =~ ^[0-9]+[\.]{1}[0-9]+[\.]{0,1}[0-9]*$ ]]; then
+        CompareResult="$(compareLooseVersion "$(determineBaseOSVersion)" "$approved_min_os_app_ver")"
+        
+        if [[ "$CompareResult" = "False" ]]; then
+            echo "The macOS installer app version is $base_os_ver. The system admin has set a minimum version requirement of $approved_min_os_app_ver for macOS installers."
+            echo "Minimum required macOS installer app version is greater than the version of the macOS installer on the client."
+            echo "Attempting to download the latest macOS installer."
+            downloadOSInstaller
+            
+            if [[ "$?" = 0 ]]; then
+                CompareResult="$(compareLooseVersion "$(determineBaseOSVersion)" "$approved_min_os_app_ver")"
+                
+                if [[ "$CompareResult" = "False" ]]; then
+                    echo "Looks like the download attempt failed."
+                    echo "Minimum required macOS installer app version is still greater than the version on the client."
+                    echo "Please install the macOS installer app version that meets the minimum requirement set."
+                    echo "Alternatively, you can modify or remove the minimum macOS installer app version requirement."
+                    "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+                    exit 8
+                fi
+            fi
+        elif [[ "$CompareResult" = "True" ]]; then
+            echo "Minimum required macOS installer app version is greater than the version on the client."
+        fi
+    else
+        echo "Invalid Minimum OS version value."
+        "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+        exit 3
+    fi
 }
 
 # Function to check that the additional post-install package is available is a proper distribution-style package with a product id
@@ -529,9 +598,64 @@ validatePostInstallPKG (){
     fi
 }
 
+
+mountVolume (){
+    # Pass 1 argument containing path to disk image to determine its volume name
+    disk_image="${1}"
+    
+    # Mount volume
+    /usr/bin/hdiutil attach -nobrowse -quiet "$disk_image"
+    
+    # Ensure DMG mounted successfully
+    if [[ "$?" != 0 ]]; then
+        echo "Unable to mount "$disk_image"."
+        
+        return 1
+    fi
+}
+
+determineVolumeName (){
+    # Pass 1 argument containing path to disk image to determine its volume name
+    disk_image="${1}"
+    
+    # Determine the name of the mounted volume based on source image-path
+    mounted_volumes=$(/usr/bin/hdiutil info -plist)
+    
+    finished="false"
+    c=0
+    i=0
+    while [[ "$finished" == "false" ]]; do
+        if [[ "$(/usr/libexec/PlistBuddy -c "print :images:"$c":image-path" /dev/stdin <<<$mounted_volumes 2>&1)" == *"Does Not Exist"* ]]; then
+            finished="true"
+        fi
+        if [[ "$(/usr/libexec/PlistBuddy -c "print :images:"$c":image-path" /dev/stdin <<<$mounted_volumes 2>&1)" == "$disk_image" ]]; then
+            while [[ "$finished" == "false" ]]; do
+                if [[ "$(/usr/libexec/PlistBuddy -c "print :images:"$c":system-entities:"$i":mount-point" /dev/stdin <<<$mounted_volumes 2>&1)" == "/Volumes/"* ]]; then
+                    mounted_volume_name="$(/usr/libexec/PlistBuddy -c "print :images:"$c":system-entities:"$i":mount-point" /dev/stdin <<<$mounted_volumes 2>&1)"
+                    echo "$mounted_volume_name"
+                    finished="true"
+                else
+                    i=$((i + 1))
+                    # echo $i
+                fi
+            done
+        else
+            c=$((c + 1))
+            # echo $c
+        fi
+    done
+}
+
+
 # Function to validate certificates of macOS installer app and the packages contained within InstallESD.pkg
 # This function will only fail if a certificate is found and is found to be expired
 validateAppExpirationDate (){
+    # Function will only work on macOS installers lower than macOS 11/10.16 as the contents of the image that is laid down is different
+    if [[ "$installer_app_maj_ver" -ge 16 ]]; then
+        echo "Skipping app expiration date validation as this macOS installer is running $installer_app_maj_ver."
+        return 0
+    fi
+    
     # Capture current directory to return back to it later
     current_dir="$(/bin/pwd)"
     
@@ -583,10 +707,10 @@ validateAppExpirationDate (){
     unsigned_pkgutil="Status: no signature"
     
     # Mount volume
-    /usr/bin/hdiutil attach -nobrowse -quiet "$mac_os_installer_path"/Contents/SharedSupport/InstallESD.dmg
+    mountVolume "$mac_os_installer_path/Contents/SharedSupport/InstallESD.dmg"
     
-    # Ensure DMG mounted successfully
-    if [[ "$?" != 0 ]]; then
+    # Clean up if mount failed
+    if [[ $? -ne 0 ]]; then
         echo "Unable to mount "$mac_os_installer_path"/Contents/SharedSupport/InstallESD.dmg to validate certificate."
         echo "Will proceed without validating contents of "$mac_os_installer_path"/Contents/SharedSupport/InstallESD.dmg."
         
@@ -600,32 +724,7 @@ validateAppExpirationDate (){
     fi
     
     # Determine the name of the mounted volume based on source image-path
-    mounted_volumes=$(/usr/bin/hdiutil info -plist)
-    
-    finished="false"
-    c=0
-    i=0
-    while [[ "$finished" == "false" ]]; do
-        if [[ "$(/usr/libexec/PlistBuddy -c "print :images:"$c":image-path" /dev/stdin <<<$mounted_volumes 2>&1)" == *"Does Not Exist"* ]]; then
-            finished="true"
-        fi
-        if [[ "$(/usr/libexec/PlistBuddy -c "print :images:"$c":image-path" /dev/stdin <<<$mounted_volumes 2>&1)" == "$mac_os_installer_path/Contents/SharedSupport/InstallESD.dmg" ]]; then
-            while [[ "$finished" == "false" ]]; do
-                if [[ "$(/usr/libexec/PlistBuddy -c "print :images:"$c":system-entities:"$i":mount-point" /dev/stdin <<<$mounted_volumes 2>&1)" == "/Volumes/"* ]]; then
-                    volume_name="$(/usr/libexec/PlistBuddy -c "print :images:"$c":system-entities:"$i":mount-point" /dev/stdin <<<$mounted_volumes 2>&1)"
-                    echo "$volume_name"
-                    finished="true"
-                else
-                    i=$((i + 1))
-                    echo $i
-                fi
-            done
-        else
-            c=$((c + 1))
-            echo $c
-        fi
-    done
-    
+    volume_name="$(determineVolumeName "$mac_os_installer_path/Contents/SharedSupport/InstallESD.dmg")"
     
     # Loop through all packages and determine if any of them have expired certificates
     IFS="
@@ -668,7 +767,17 @@ installCommand (){
     log="$2"
     
     # The startosinstall tool has been updated in various forms. The commands below take advantage of those updates.
-    if [[ "$(compareLooseVersion $base_os_ver 10.15)" = True ]] && [[ ! -e "$add_install_pkg" ]]; then
+    if [[ "$(compareLooseVersion $base_os_ver 11.0)" = True ]] && [[ ! -e "$add_install_pkg" ]]; then
+        echo "The embedded OS version in the macOS installer app is greater than or equal to 10.15. Running appropriate startosinstall command to initiate install."
+        # Initiate the macOS Catalina silent install
+        # 30 second delay should give the jamf binary enough time to upload policy results to JSS
+        /usr/bin/script -q -t 1 "$log" "$mac_os_installer_path/Contents/Resources/startosinstall" --rebootdelay 30 --agreetolicense --forcequitapps --pidtosignal "$JHPID"; echo "Exit Code:$?" >> "$log" &
+    elif [[ "$(compareLooseVersion $base_os_ver 11.0)" = True ]] && [[ -e "$add_install_pkg" ]]; then
+        echo "The embedded OS version in the macOS installer app is greater than or equal to 10.15. Running appropriate startosinstall command to initiate install with an additional install package to run post-OS install."
+        # Initiate the macOS Catalina silent install
+        # 30 second delay should give the jamf binary enough time to upload policy results to JSS
+        /usr/bin/script -q -t 1 "$log" "$mac_os_installer_path/Contents/Resources/startosinstall" --rebootdelay 30 --agreetolicense --installpackage "$add_install_pkg" --forcequitapps --pidtosignal "$JHPID"; echo "Exit Code:$?" >> "$log" &
+    elif [[ "$(compareLooseVersion $base_os_ver 10.15)" = True ]] && [[ ! -e "$add_install_pkg" ]]; then
         echo "The embedded OS version in the macOS installer app is greater than or equal to 10.15. Running appropriate startosinstall command to initiate install."
         # Initiate the macOS Catalina silent install
         # 30 second delay should give the jamf binary enough time to upload policy results to JSS
@@ -726,7 +835,7 @@ installOS (){
     fvAuthRestart
     
     # Update message letting end-user know upgrade is going to start.
-    "$jamfHelper" -windowType hud -lockhud -title "$app_name $1" -description "$inprogress" -icon "$mas_os_icon" &
+    "$jamfHelper" -windowType hud -lockhud -title "$app_name$1" -description "$inprogress" -icon "$mas_os_icon" &
     
     # Get the Process ID of the last command
     JHPID=$(echo "$!")
@@ -765,60 +874,60 @@ installOS (){
 }
 
 # Function to attempt to quit all active applications
-quitAllApps (){
-    # Prompt all running applications to quit before running the installer
-    if [[ -z "$logged_in_user" ]]; then
-        echo "No user is logged in. No apps to close."
-        return 0
-    fi
-    
-    # Get the user id of the logged in user
-    user_id=$(/usr/bin/id -u "$logged_in_user")
-    
-    if [[ "$os_major_ver" -le 9 ]]; then
-        l_id=$(pgrep -x -u "$user_id" loginwindow)
-        l_method="bsexec"
-    elif [[ "$os_major_ver" -gt 9 ]]; then
-        l_id=$user_id
-        l_method="asuser"
-    fi
-    
-    exitCode="$(/bin/launchctl $l_method $l_id /usr/bin/osascript <<EOD
-tell application "System Events" to set the visible of every process to true
-set white_list to {"Finder", "Self Service"}
-try
-    tell application "Finder"
-        set process_list to the name of every process whose visible is true
-    end tell
-    repeat with i from 1 to (number of items in process_list)
-        set this_process to item i of the process_list
-        if this_process is not in white_list then
-            tell application this_process
-                quit
-            end tell
-        end if
-    end repeat
-on error
-    tell the current application to display dialog "We were unable to close all applications." & return & "Please save your work and close all opened applications." buttons {"Try Again","Quit"} default button 1 with icon 0
-    if button returned of result = "Quit" then
-        set exitCode to "Quit"
-    else if button returned of result = "Try Again" then
-        set exitCode to "Try Again"
-    end if
-end try
-EOD)"
-
-    # If not all applications were closed properly, log comment and exit
-    if [[ "$exitCode" == "Quit" ]]; then
-        echo "Unable to close all applications before running installer"
-        exit 25
-    elif [[ "$exitCode" == "Try Again" ]]; then
-        # Try to quit apps again
-        quitAllApps
-    fi
-    
-    return 0
-}
+# quitAllApps (){
+#     # Prompt all running applications to quit before running the installer
+#     if [[ -z "$logged_in_user" ]]; then
+#         echo "No user is logged in. No apps to close."
+#         return 0
+#     fi
+#     
+#     # Get the user id of the logged in user
+#     user_id=$(/usr/bin/id -u "$logged_in_user")
+#     
+#     if [[ "$os_major_ver" -eq 10 && "$os_minor_ver" -le 9 ]]; then
+#         l_id=$(/usr/bin/pgrep -x -u "$user_id" loginwindow)
+#         l_method="bsexec"
+#     elif [[ "$os_major_ver" -ge 11 || "$os_major_ver" -eq 10 && "$os_minor_ver" -gt 9 ]]; then
+#         l_id=$user_id
+#         l_method="asuser"
+#     fi
+#     
+#     exitCode="$(/bin/launchctl $l_method $l_id /usr/bin/osascript <<EOD
+# tell application "System Events" to set the visible of every process to true
+# set white_list to {"Finder", "Self Service"}
+# try
+#     tell application "Finder"
+#         set process_list to the name of every process whose visible is true
+#     end tell
+#     repeat with i from 1 to (number of items in process_list)
+#         set this_process to item i of the process_list
+#         if this_process is not in white_list then
+#             tell application this_process
+#                 quit
+#             end tell
+#         end if
+#     end repeat
+# on error
+#     tell the current application to display dialog "We were unable to close all applications." & return & "Please save your work and close all opened applications." buttons {"Try Again","Quit"} default button 1 with icon 0
+#     if button returned of result = "Quit" then
+#         set exitCode to "Quit"
+#     else if button returned of result = "Try Again" then
+#         set exitCode to "Try Again"
+#     end if
+# end try
+# EOD)"
+# 
+#     If not all applications were closed properly, log comment and exit
+#     if [[ "$exitCode" == "Quit" ]]; then
+#         echo "Unable to close all applications before running installer"
+#         exit 25
+#     elif [[ "$exitCode" == "Try Again" ]]; then
+#         Try to quit apps again
+#         quitAllApps
+#     fi
+#     
+#     return 0
+# }
 
 # Implement a self-deleting launch daemon to perform a Jamf Pro recon on first boot
 createReconAfterUpgradeLaunchDaemon (){
@@ -865,7 +974,7 @@ checkForFreeSpace
 if [[ ! -e "$mac_os_installer_path" ]]; then
     downloadOSInstaller
     
-    heading="(2 of 2)"
+    heading=" (2 of 2)"
     
     # Make sure macOS installer app is on computer
     if [[ ! -e "$mac_os_installer_path" ]]; then
@@ -873,29 +982,76 @@ if [[ ! -e "$mac_os_installer_path" ]]; then
     fi
 fi
 
+installer_app_maj_ver="$(checkOSInstallerVersion | /usr/bin/cut -d . -f 1)"
 checkOSInstaller
 
 # Variables reliant on installer being on disk
 min_req_os="$(/usr/libexec/PlistBuddy -c "print :LSMinimumSystemVersion" "$mac_os_installer_path"/Contents/Info.plist 2>/dev/null)"
-min_req_os_maj="$(echo "$min_req_os" | /usr/bin/cut -d . -f 2)"
-min_req_os_min="$(echo "$min_req_os" | /usr/bin/cut -d . -f 3)"
-available_free_space=$(/bin/df -g / | /usr/bin/awk '(NR == 2){print $4}')
+min_req_os_maj="$(echo "$min_req_os" | /usr/bin/cut -d . -f 1)"
+min_req_os_min="$(echo "$min_req_os" | /usr/bin/cut -d . -f 2)"
+min_req_os_patch="$(echo "$min_req_os" | /usr/bin/cut -d . -f 3)"
 required_space="$(/usr/bin/du -hsg "$mac_os_installer_path/Contents/SharedSupport" | /usr/bin/awk '{print $1}')"
 needed_free_space="$(($required_space * 4))"
-base_os_ver="$(/usr/libexec/PlistBuddy -c "print :'System Image Info':version" "$mac_os_installer_path"/Contents/SharedSupport/InstallInfo.plist 2>/dev/null)"
-base_os_maj="$(echo "$base_os_ver" | /usr/bin/cut -d . -f 2)"
-insufficient_free_space_for_install_dialog="Your boot drive must have $needed_free_space gigabytes of free space available in order to install $app_name. It currently has $available_free_space gigabytes free. Please free up space and try again. If you need assistance, please contact $it_contact."
+
+determineBaseOSVersion (){
+    # This needs to be re-worked because of macOS 11
+    # Determine version of the OS included in the installer
+    if [[ "$installer_app_maj_ver" -ge 16 ]]; then
+        # Mount volume
+        /usr/bin/hdiutil attach -nobrowse -quiet "$mac_os_installer_path"/Contents/SharedSupport/SharedSupport.dmg
+        
+        # Path to mobile asset xml which contains path to zip containing base OS image
+        mobile_asset_xml="/Volumes/Shared Support/com_apple_MobileAsset_MacSoftwareUpdate/com_apple_MobileAsset_MacSoftwareUpdate.xml"
+        
+        # Relative path to mobile asset
+        mobile_asset="$(/usr/libexec/PlistBuddy -c "print :Assets:0:__RelativePath" "$mobile_asset_xml" 2>/dev/null)"
+        
+        checkForPlistValue "$mobile_asset"
+        
+        # Path to base image zip
+        base_image_zip="/Volumes/Shared Support/$mobile_asset"
+        
+        # Extract plist containing OS version to stdout
+        #/usr/bin/unzip -j "$base_image_zip" "Info.plist" -d "/private/tmp"
+        base_image_info_plist="$(/usr/bin/unzip -pj "$base_image_zip" "Info.plist")"
+        
+        # Determine base OS image version
+        base_os_ver="$(/usr/libexec/PlistBuddy -c "print :MobileAssetProperties:OSVersion" /dev/stdin <<<"$base_image_info_plist" 2>/dev/null)"
+        
+        # Do not forget to detach and unmount volume
+        # Determine volume name of disk image
+        volume_name="$(determineVolumeName "$mac_os_installer_path"/Contents/SharedSupport/SharedSupport.dmg)"
+        
+        # Unmount volume
+        /usr/bin/hdiutil detach -force "$volume_name"
+    else
+        # Determine base OS image version
+        base_os_ver="$(/usr/libexec/PlistBuddy -c "print :'System Image Info':version" "$mac_os_installer_path"/Contents/SharedSupport/InstallInfo.plist 2>/dev/null)"
+    fi
+    
+    # Ensure $base_os_ver is not empty
+    if [[ -z "$base_os_ver" ]]; then
+        echo "Could not determine OS version in the app installer's base image."
+        "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+        exit 26
+    fi
+    
+    echo "$base_os_ver"
+}
+
+base_os_maj="$(determineBaseOSVersion | /usr/bin/cut -d . -f 2)"
+
 
 # Run through a few post-download checks
 checkForFreeSpace
-checkMinReqOSValue
+checkMinReqOSVer
 validateAppExpirationDate
 checkForMountedInstallESD "/Volumes/InstallESD"
 checkForMountedInstallESD "/Volumes/OS X Install ESD"
 validatePostInstallPKG
-quitAllApps
+# quitAllApps
 
-minOSReqCheck
+meetsApprovedMinimumOSInstallerVersion
 
 installOS "$heading"
 
