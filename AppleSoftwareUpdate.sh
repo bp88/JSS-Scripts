@@ -82,8 +82,9 @@ setDeferral (){
 DeferralPlistPath="/Library/Application Support/JAMF"
 [[ ! -d "$DeferralPlistPath" ]] && /bin/mkdir -p "$DeferralPlistPath"
 
-OSMajorVersion="$(/usr/bin/sw_vers -productVersion | /usr/bin/cut -d '.' -f 2)"
-OSMinorVersion="$(/usr/bin/sw_vers -productVersion | /usr/bin/cut -d '.' -f 3)"
+OSMajorVersion="$(/usr/bin/sw_vers -productVersion | /usr/bin/cut -d '.' -f 1)"
+OSMinorVersion="$(/usr/bin/sw_vers -productVersion | /usr/bin/cut -d '.' -f 2)"
+OSPatchVersion="$(/usr/bin/sw_vers -productVersion | /usr/bin/cut -d '.' -f 3)"
 DeferralPlist="$DeferralPlistPath/com.custom.deferrals.plist"
 BundleID="com.apple.SoftwareUpdate"
 DeferralType="count"
@@ -113,23 +114,23 @@ ListOfSoftwareUpdates="/tmp/ListOfSoftwareUpdates"
 
 # If non-existent path has been supplied, set appropriate Software Update icon depending on OS version
 if [[ ! -e "$AppleSUIcon" ]]; then
-    if [[ "$OSMajorVersion" -gt 13 ]]; then
-        AppleSUIcon="/System/Library/CoreServices/Software Update.app/Contents/Resources/SoftwareUpdate.icns"
-    elif [[ "$OSMajorVersion" -eq 13 ]]; then
+    if [[ "$OSMajorVersion" -ge 11 ]] || [[ "$OSMajorVersion" -eq 10 && "$OSMinorVersion" -gt 13 ]]; then
+        AppleSUIcon="/System/Library/PreferencePanes/SoftwareUpdate.prefPane/Contents/Resources/SoftwareUpdate.icns"
+    elif [[ "$OSMajorVersion" -eq 10 && "$OSMinorVersion" -eq 13 ]]; then
         AppleSUIcon="/System/Library/CoreServices/Install Command Line Developer Tools.app/Contents/Resources/SoftwareUpdate.icns"
-    elif [[ "$OSMajorVersion" -ge 8 ]] && [[ "$OSMajorVersion" -le 12 ]]; then
+    elif [[ "$OSMajorVersion" -eq 10 && "$OSMinorVersion" -ge 8 && "$OSMinorVersion" -le 12 ]]; then
         AppleSUIcon="/System/Library/CoreServices/Software Update.app/Contents/Resources/SoftwareUpdate.icns"
-    elif [[ "$OSMajorVersion" -lt 8 ]]; then
+    elif [[ "$OSMajorVersion" -eq 10 && "$OSMinorVersion" -lt 8 ]]; then
         AppleSUIcon="/System/Library/CoreServices/Software Update.app/Contents/Resources/Software Update.icns"
     fi
 fi
 
 # Path to the alert caution icon
-AlertIcon="/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/AlertCautionIcon.icns"
+AlertIcon="/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/AlertStopIcon.icns"
 
 ## Verbiage For Messages ##
 # Message to guide user to Software Update process
-if [[ "$OSMajorVersion" -ge 14 ]]; then
+if [[ "$OSMajorVersion" -ge 11 ]] || [[ "$OSMajorVersion" -eq 10 && "$OSMinorVersion" -ge 14 ]]; then
     #SUGuide="by clicking on the Apple menu, clicking System Preferences and clicking Software Update to install any available updates."
     SUGuide="by navigating to:
 
@@ -218,7 +219,7 @@ updateRestartAction (){
     #   Installation will not complete successfully if you choose to restart your computer instead of shutting down.
     #   Please call halt(8) or select Shut Down from the Apple menu. To automate the shutdown process with softwareupdate(8), use --restart.
     if [[ "$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep -E "Please call halt")" || "$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep -E "your computer must shut down")" ]] && [[ "$SEPType" ]]; then
-        if [[ "$OSMajorVersion" -eq 13 && "$OSMinorVersion" -ge 4 ]] || [[ "$OSMajorVersion" -ge 14 ]]; then
+        if [[ "$OSMajorVersion" -eq 10 && "$OSMinorVersion" -eq 13 && "$OSPatchVersion" -ge 4 ]] || [[ "$OSMajorVersion" -eq 10 && "$OSMinorVersion" -ge 14 ]] || [[ "$OSMajorVersion" -ge 11 ]]; then
             # Resetting the deferral count
             setDeferral "$BundleID" "$DeferralType" "$DeferralValue" "$DeferralPlist"
             
@@ -241,9 +242,9 @@ updateRestartAction (){
 
 updateGUI (){
     # Update through the GUI
-    if [[ "$OSMajorVersion" -ge 14 ]]; then
+    if [[ "$OSMajorVersion" -ge 11 ]] || [[ "$OSMajorVersion" -eq 10 && "$OSMinorVersion" -ge 14 ]]; then
         /bin/launchctl $LMethod $LID /usr/bin/open "/System/Library/CoreServices/Software Update.app"
-    elif [[ "$OSMajorVersion" -ge 8 ]] && [[ "$OSMajorVersion" -le 13 ]]; then
+    elif [[ "$OSMajorVersion" -eq 10 && "$OSMinorVersion" -ge 8 && "$OSMinorVersion" -le 13 ]]; then
         /bin/launchctl $LMethod $LID /usr/bin/open macappstore://showUpdatesPage
     fi
 }
@@ -335,7 +336,7 @@ LoggedInUser="$(/usr/sbin/scutil <<< "show State:/Users/ConsoleUser" | /usr/bin/
 LoggedInUserID=$(/usr/bin/id -u "$LoggedInUser")
 
 # Determine launchctl method we will need to use to launch osascript under user context
-if [[ "$OSMajorVersion" -le 9 ]]; then
+if [[ "$OSMajorVersion" -eq 10 && "$OSMinorVersion" -le 9 ]]; then
     LID=$(/usr/bin/pgrep -x -u "$LoggedInUserID" loginwindow)
     LMethod="bsexec"
 else
