@@ -281,7 +281,7 @@ fvAuthRestart (){
     
     # FileVault authenticated restart was introduced in 10.8.3
     # However prior to 10.12 it does not let you provide a value of "-1" to the option -delayminutes "-1"
-    if [[ "$(/usr/bin/fdesetup supportsauthrestart)" != "true" ]] || [[ "$os_major_ver" -ge 11 || "$os_major_ver" -eq 10 && "$os_minor_ver" -lt 12 ]]; then
+    if [[ "$(/usr/bin/fdesetup supportsauthrestart)" != "true" ]] || [[ "$os_major_ver" -eq 10 && "$os_minor_ver" -lt 12 ]]; then
         echo "Either FileVault authenticated restart is not supported on this Mac or the OS is older than 10.12. Skipping FV authenticated restart."
         echo "User may need to authenticate on reboot. Letting them know via JamfHelper prompt."
         "$jamfHelper" -windowType utility -icon "$filevaulticon" -title "FileVault Notice" -description "$fv_proceed" -button1 "Continue" -defaultButton 1 -timeout 60 &
