@@ -16,6 +16,8 @@
 #               Function to check for expired certificates in the macOS installer app
 #               Reduced the number of Jamf parameters required by capturing information from the macOS installer itself
 #               Cleaned up documentation
+# 10/2/20 Edit: Updated for macOS 11 compatibility. Due to some issues, I had to comment out the quit all active apps function and code.
+#               macOS 11 installer has changed enough that checking for expired certificates is not feasible like it was with prior installers.
 #
 # This script is meant to be used with Jamf Pro.
 # It will make sure of the macOS Sierra, High Sierra, Mojave, or Catalina installer app along with some JSS script parameters and is intended to be somewhat easy to modify if used with future OS deployments.
@@ -62,13 +64,15 @@
 # 22: Failed to unmount InstallESD. InstallESD.dmg may be mounted by the installer when it is launched through the GUI. However if you quit the GUI InstallAssistant, the app fails to unmount InstallESD which can cause problems on later upgrade attempts.
 # 23: Expired certificate found in macOS installer app
 # 24: Expired certificate found in one of packages inside macOS installer's InstallESD.dmg
-# 25: Could not determine plist value.
+# 25: Could not determine plist value. Plistbuddy returned an empty value.
 # 26: Could not determine OS version in the app installer's base image.
+# 27: Could not determine plist value. Plistbuddy is trying to read from a file that does not exist.
 
 # Variables to determine paths, OS version, disk space, and power connection. Do not edit.
-os_major_ver="$(/usr/bin/sw_vers -productVersion | /usr/bin/cut -d . -f 1)"
-os_minor_ver="$(/usr/bin/sw_vers -productVersion | /usr/bin/cut -d . -f 2)"
-os_patch_ver="$(/usr/bin/sw_vers -productVersion | /usr/bin/cut -d . -f 3)"
+os_ver="$(/usr/bin/sw_vers -productVersion)"
+os_major_ver="$(echo $os_ver | /usr/bin/cut -d . -f 1)"
+os_minor_ver="$(echo $os_ver | /usr/bin/cut -d . -f 2)"
+os_patch_ver="$(echo $os_ver | /usr/bin/cut -d . -f 3)"
 jamfHelper="/Library/Application Support/JAMF/bin/jamfHelper.app/Contents/MacOS/jamfHelper"
 jamf="/usr/local/bin/jamf"
 power_source=$(/usr/bin/pmset -g ps | /usr/bin/grep "Power")
@@ -89,10 +93,15 @@ app_name="$(echo "$mac_os_installer_path" | /usr/bin/awk '{ gsub(/.*Install /,""
 # Feel free to adjust these icon paths
 mas_os_icon="$mac_os_installer_path/Contents/Resources/InstallAssistant.icns"
 downloadicon="/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/GenericNetworkIcon.icns"
-driveicon="/System/Library/PreferencePanes/StartupDisk.prefPane/Contents/Resources/StartupDiskPref.icns"
-lowbatteryicon="/System/Library/CoreServices/Menu Extras/Battery.menu/Contents/Resources/LowBattery.icns"
-alerticon="/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/AlertCautionIcon.icns"
+lowbatteryicon="/System/Library/CoreServices/PowerChime.app/Contents/Resources/battery_icon.png"
+alerticon="/System/Library/CoreServices/Problem Reporter.app/Contents/Resources/ProblemReporter.icns"
 filevaulticon="/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/FileVaultIcon.icns"
+
+if [[ "$os_major_ver" -ge 11 ]]; then
+    driveicon="/System/Library/PreferencePanes/StartupDisk.prefPane/Contents/Resources/StartupDisk.icns"
+else
+    driveicon="/System/Library/PreferencePanes/StartupDisk.prefPane/Contents/Resources/StartupDiskPref.icns"
+fi
 
 # iCloud icons may not be available on OS prior to 10.10.
 # White iCloud icon
@@ -100,8 +109,12 @@ filevaulticon="/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/
 # Blue iCloud icon
 #icloud_icon="/System/Library/PrivateFrameworks/CloudDocsDaemon.framework/Versions/A/Resources/iCloud Drive.app/Contents/Resources/iCloudDrive.icns"
 
-# Alternative Drive icon
-#/System/Library/Extensions/IOSCSIArchitectureModelFamily.kext/Contents/Resources/USBHD.icns
+# Alternative icons
+# driveicon="/System/Library/Extensions/IOSCSIArchitectureModelFamily.kext/Contents/Resources/USBHD.icns"
+# lowbatteryicon="/System/Library/CoreServices/Menu Extras/Battery.menu/Contents/Resources/LowBattery.icns" # Last existed in 10.13
+# lowbatteryicon="/System/Library/CoreServices/Installer Progress.app/Contents/Resources/LowBatteryEmpty.tiff"
+# lowbatteryicon="/System/Library/PrivateFrameworks/EFILogin.framework/Versions/A/Resources/EFIResourceBuilder.bundle/Contents/Resources/battery_empty@2x.png"
+# lowbatteryicon="/System/Library/PrivateFrameworks/EFILogin.framework/Versions/A/Resources/EFIResourceBuilder.bundle/Contents/Resources/battery_dead@2x.png"
 
 # Messages for JAMF Helper to display
 # Feel free to modify to your liking.
@@ -163,16 +176,24 @@ compareLooseVersion (){
     first_ver="${1}"
     second_ver="${2}"
     
-    first_ver_maj=$(echo $first_ver | /usr/bin/cut -d . -f 2)
-    second_ver_maj=$(echo $second_ver | /usr/bin/cut -d . -f 2)
+    first_ver_maj=$(echo $first_ver | /usr/bin/cut -d . -f 1)
+    second_ver_maj=$(echo $second_ver | /usr/bin/cut -d . -f 1)
     
-    first_ver_min=$(echo $first_ver | /usr/bin/cut -d . -f 3)
+    first_ver_min=$(echo $first_ver | /usr/bin/cut -d . -f 2)
     [[ -z "$first_ver_min" ]] && first_ver_min="0"
     
-    second_ver_min=$(echo $second_ver | /usr/bin/cut -d . -f 3)
+    second_ver_min=$(echo $second_ver | /usr/bin/cut -d . -f 2)
     [[ -z "$second_ver_min" ]] && second_ver_min="0"
     
-    if [[ $first_ver_maj -gt $second_ver_maj ]] || [[ $first_ver_maj -eq $second_ver_maj && $first_ver_min -ge $second_ver_min ]]; then
+    first_ver_patch=$(echo $first_ver | /usr/bin/cut -d . -f 3)
+    [[ -z "$first_ver_patch" ]] && first_ver_patch="0"
+    
+    second_ver_patch=$(echo $second_ver | /usr/bin/cut -d . -f 3)
+    [[ -z "$second_ver_patch" ]] && second_ver_patch="0"
+    
+    if [[ $first_ver_maj -gt $second_ver_maj ]] ||
+       [[ $first_ver_maj -eq $second_ver_maj && $first_ver_min -ge $second_ver_min ]] ||
+       [[ $first_ver_maj -eq $second_ver_maj && $first_ver_min -eq $second_ver_min && $first_ver_patch -gt $second_ver_patch ]]; then
         echo "True"
         return 0
     fi
@@ -186,23 +207,24 @@ checkForPlistValue (){
     # If path to plist does not exist, output will be: "File Doesn't Exist, Will Create: XXXXXXX"
     # If plist key does not exist, output will be empty.
     
+    # Originally this function was meant to exit the script. However with bash, if this
+    # function is called in a variable as part of a subprocess and an error is encountered
+    # the script never exists like it's supposed to
+    # This is why you see a lot of repeat code whenever this function is called.
+    
     # Check to make sure only one value has been passed
     if [[ "$#" -ne 1 ]]; then
         echo "Pass only 1 value to checkForPlistValue function."
         "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
-        exit 25
+        return 25
     fi
     
     value="${1}"
     
     if [[ -z "$value" ]]; then
-        echo "Plistbuddy returned an empty value."
-        "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
-        exit 25
-    elif [[ "$value" =~ "File Doesn\'t Exist, Will Create:" ]]; then
-        echo "Plistbuddy is trying to read from a file that does not exist."
-        "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
-        exit 25
+        return 25
+    elif [[ "$value" =~ "File Doesn't Exist, Will Create:" ]]; then
+        return 27
     fi
 }
 
@@ -370,46 +392,56 @@ redownloadOSInstaller (){
 }
 
 checkOSInstallerVersion (){
-    installer_app_ver="$(/usr/libexec/PlistBuddy -c "print :CFBundleShortVersionString" "$mac_os_installer_path"/Contents/Info.plist 2>/dev/null)"
+    installer_app_version="$(/usr/libexec/PlistBuddy -c "print :CFBundleShortVersionString" "$mac_os_installer_path"/Contents/Info.plist 2>/dev/null)"
     
-    if [[ -z "$installer_app_ver" ]]; then
+    # Confirm that value returned by plistbuddy is valid
+    checkForPlistValue "$installer_app_version"
+    
+    if [[ $? -eq 25 ]]; then
+        echo "Plistbuddy returned an empty value."
+        "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+        exit 25
+    elif [[ $? -eq 27 ]]; then
+        echo "Plistbuddy is trying to read from a file that does not exist."
+        "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+        exit 27
+    fi
+    
+    if [[ -z "$installer_app_version" ]]; then
         "$jamfHelper" -windowType utility -icon "$alerticon" -title "Download Failure" -description "$download_error" -button1 "Exit" -defaultButton 1 &
         exit 6
     fi
     
-    echo "$installer_app_ver"
+    echo "$installer_app_version"
 }
 
 
 # Function to check macOS installer app has been installed and if not re-download and do a comparison check between OS installer app version required
 checkOSInstaller (){
-    # Installer structure changed in macOS 11/10.16
-    if [[ "$installer_app_maj_ver" -ge 16 ]]; then
-        # Not the most accurate check but if the SharedSupport.dmg and startosinstall binary are not available chances are the installer is no good.
+    count=0
+    
+    # Loop through basic check to confirm full installer is on device
+    # If installer components are missing, attempt to download installer again
+    for i in {1..2}; do
+        # For macOS 11, if the SharedSupport.dmg and startosinstall binary are not available chances are the installer is no good.
         if [[ ! -e "$mac_os_installer_path/Contents/SharedSupport/SharedSupport.dmg" ]] || [[ ! -e "$mac_os_installer_path/Contents/Resources/startosinstall" ]]; then
-            redownloadOSInstaller
-            
-            if [[ ! -e "$mac_os_installer_path/Contents/SharedSupport/SharedSupport.dmg" ]] || [[ ! -e "$mac_os_installer_path/Contents/Resources/startosinstall" ]]; then
-                "$jamfHelper" -windowType utility -icon "$alerticon" -title "Download Failure" -description "$download_error" -button1 "Exit" -defaultButton 1 &
-                exit 5
-            fi
-            
-            return 0
+            ((count++))
         fi
-    else
-        # Not the most accurate check but if the InstallESD.dmg and startosinstall binary are not available chances are the installer is no good.
+        # For macOS 10.15 or lower, if the InstallESD.dmg and startosinstall binary are not available chances are the installer is no good.
         if [[ ! -e "$mac_os_installer_path/Contents/SharedSupport/InstallESD.dmg" ]] || [[ ! -e "$mac_os_installer_path/Contents/Resources/startosinstall" ]]; then
-            redownloadOSInstaller
-            
-            # Final check to see if macOS installer app is on computer
-            if [[ ! -e "$mac_os_installer_path/Contents/SharedSupport/InstallESD.dmg" ]] || [[ ! -e "$mac_os_installer_path/Contents/Resources/startosinstall" ]]; then
-                "$jamfHelper" -windowType utility -icon "$alerticon" -title "Download Failure" -description "$download_error" -button1 "Exit" -defaultButton 1 &
-                exit 5
-            fi
-            
-            return 0
+            ((count++))
         fi
+        if [[ $count -eq $((2*$i)) ]]; then
+            redownloadOSInstaller
+        fi
+    done
+    
+    if [[ $count -eq 4 ]]; then
+        "$jamfHelper" -windowType utility -icon "$alerticon" -title "Download Failure" -description "$download_error" -button1 "Exit" -defaultButton 1 &
+        exit 5
     fi
+    
+    return 0
 }
 
 # Check CoreStorage Conversion State
@@ -494,22 +526,15 @@ deleteInstallAssistantRestartPref (){
 checkMinReqOSVer (){
     # Check to make sure the computer is running the minimum supported OS as determined by the OS installer. Note: macOS Sierra requires OS 10.7.5 or higher.
     # Also confirm that we are dealing with a valid OS version which is in the form of 10.12.4
+    
     if [[ -n "$min_req_os" ]]; then
         if [[ "$min_req_os" =~ ^[0-9]+[\.]{1}[0-9]+[\.]{0,1}[0-9]*$ ]]; then
-            if [[ "$os_major_ver" -lt "$min_req_os_maj" ]]; then
+            if [[ "$(compareLooseVersion $os_ver $min_req_os)" == "False" ]]; then
                 echo "Unsupported Operating System. Cannot upgrade $os_major_ver.$os_minor_ver.$os_patch_ver to $min_req_os"
                 "$jamfHelper" -windowType utility -icon "$alerticon" -title "Unsupported OS" -description "$bad_os" -button1 "Exit" -defaultButton 1
                 exit 2
-            fi
-            if [[ "$os_minor_ver" -lt "$min_req_os_min" ]]; then
-                echo "Unsupported Operating System. Cannot upgrade $os_major_ver.$os_minor_ver.$os_patch_ver to $min_req_os"
-                "$jamfHelper" -windowType utility -icon "$alerticon" -title "Unsupported OS" -description "$bad_os" -button1 "Exit" -defaultButton 1
-                exit 2
-            fi
-            if [[ "$os_patch_ver" -lt "$min_req_os_patch" ]]; then
-                echo "Unsupported Operating System. Cannot upgrade $os_major_ver.$os_minor_ver.$os_patch_ver to $min_req_os"
-                "$jamfHelper" -windowType utility -icon "$alerticon" -title "Unsupported OS" -description "$bad_os" -button1 "Exit" -defaultButton 1
-                exit 2
+            else
+                echo "Computer meets the minimum required OS to upgrade. Proceeding."
             fi
         else
             echo "Invalid Minimum OS version value."
@@ -632,6 +657,20 @@ determineVolumeName (){
             while [[ "$finished" == "false" ]]; do
                 if [[ "$(/usr/libexec/PlistBuddy -c "print :images:"$c":system-entities:"$i":mount-point" /dev/stdin <<<$mounted_volumes 2>&1)" == "/Volumes/"* ]]; then
                     mounted_volume_name="$(/usr/libexec/PlistBuddy -c "print :images:"$c":system-entities:"$i":mount-point" /dev/stdin <<<$mounted_volumes 2>&1)"
+                    
+                    # Confirm that value returned by plistbuddy is valid
+                    checkForPlistValue "$mounted_volume_name"
+                    
+                    if [[ $? -eq 25 ]]; then
+                        echo "Plistbuddy returned an empty value."
+                        "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+                        exit 25
+                    elif [[ $? -eq 27 ]]; then
+                        echo "Plistbuddy is trying to read from a file that does not exist."
+                        "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+                        exit 27
+                    fi
+                    
                     echo "$mounted_volume_name"
                     finished="true"
                 else
@@ -651,8 +690,8 @@ determineVolumeName (){
 # This function will only fail if a certificate is found and is found to be expired
 validateAppExpirationDate (){
     # Function will only work on macOS installers lower than macOS 11/10.16 as the contents of the image that is laid down is different
-    if [[ "$installer_app_maj_ver" -ge 16 ]]; then
-        echo "Skipping app expiration date validation as this macOS installer is running $installer_app_maj_ver."
+    if [[ "$installer_app_major_ver" -ge 16 ]]; then
+        echo "Skipping app expiration date validation as this macOS installer is running $installer_app_ver."
         return 0
     fi
     
@@ -947,7 +986,7 @@ createReconAfterUpgradeLaunchDaemon (){
 	<array>
 		<string>/bin/zsh</string>
 		<string>-c</string>
-		<string>if [[ \"\$(/usr/bin/mdfind -onlyin /System/Library/CoreServices/ '((kMDItemFSName = \"SystemVersion.plist\") &amp;&amp; InRange(kMDItemDateAdded,\$time.today,\$time.today(+1)))' -count)\" == 1 ]]; then /usr/local/bin/jamf recon &amp;&amp; /bin/rm -f /Library/LaunchDaemons/$launch_daemon.plist; /bin/launchctl bootout system/$launch_daemon; fi;</string>
+		<string>/usr/local/bin/jamf recon &amp;&amp; /bin/rm -f /Library/LaunchDaemons/$launch_daemon.plist; /bin/launchctl bootout system/$launch_daemon;</string>
 	</array>
 	<key>RunAtLoad</key>
 		<true/>
@@ -961,6 +1000,89 @@ createReconAfterUpgradeLaunchDaemon (){
         /usr/sbin/chown root:wheel "$launch_daemon_path"
         /bin/chmod 644 "$launch_daemon_path"
     fi
+}
+
+determineBaseOSVersion (){
+    # This needs to be re-worked because of chances in the macOS 11 installer
+    # Determine version of the OS included in the installer
+    if [[ "$installer_app_major_ver" -ge 16 ]]; then
+        # Mount volume
+        /usr/bin/hdiutil attach -nobrowse -quiet "$mac_os_installer_path"/Contents/SharedSupport/SharedSupport.dmg
+        
+        # Path to mobile asset xml which contains path to zip containing base OS image
+        mobile_asset_xml="/Volumes/Shared Support/com_apple_MobileAsset_MacSoftwareUpdate/com_apple_MobileAsset_MacSoftwareUpdate.xml"
+        
+        # Relative path to mobile asset
+        mobile_asset="$(/usr/libexec/PlistBuddy -c "print :Assets:0:__RelativePath" "$mobile_asset_xml" 2>/dev/null)"
+        
+        # Confirm that value returned by plistbuddy is valid
+        checkForPlistValue "$mobile_asset"
+        
+        if [[ $? -eq 25 ]]; then
+            echo "Plistbuddy returned an empty value."
+            "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+            exit 25
+        elif [[ $? -eq 27 ]]; then
+            echo "Plistbuddy is trying to read from a file that does not exist."
+            "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+            exit 27
+        fi
+        
+        # Path to base image zip
+        base_image_zip="/Volumes/Shared Support/$mobile_asset"
+        
+        # Extract plist containing OS version to stdout
+        #/usr/bin/unzip -j "$base_image_zip" "Info.plist" -d "/private/tmp"
+        base_image_info_plist="$(/usr/bin/unzip -pj "$base_image_zip" "Info.plist")"
+        
+        # Determine base OS image version
+        base_os_ver="$(/usr/libexec/PlistBuddy -c "print :MobileAssetProperties:OSVersion" /dev/stdin <<<"$base_image_info_plist" 2>/dev/null)"
+        
+        # Confirm that value returned by plistbuddy is valid
+        checkForPlistValue "$base_os_ver"
+        
+        if [[ $? -eq 25 ]]; then
+            echo "Plistbuddy returned an empty value."
+            "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+            exit 25
+        elif [[ $? -eq 27 ]]; then
+            echo "Plistbuddy is trying to read from a file that does not exist."
+            "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+            exit 27
+        fi
+        
+        # Do not forget to detach and unmount volume
+        # Determine volume name of disk image
+        volume_name="$(determineVolumeName "$mac_os_installer_path"/Contents/SharedSupport/SharedSupport.dmg)"
+        
+        # Unmount volume
+        /usr/bin/hdiutil detach -force "$volume_name" &>/dev/null
+    else
+        # Determine base OS image version
+        base_os_ver="$(/usr/libexec/PlistBuddy -c "print :'System Image Info':version" "$mac_os_installer_path"/Contents/SharedSupport/InstallInfo.plist 2>/dev/null)"
+        
+        # Confirm that value returned by plistbuddy is valid
+        checkForPlistValue "$base_os_ver"
+        
+        if [[ $? -eq 25 ]]; then
+            echo "Plistbuddy returned an empty value."
+            "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+            exit 25
+        elif [[ $? -eq 27 ]]; then
+            echo "Plistbuddy is trying to read from a file that does not exist."
+            "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+            exit 27
+        fi
+    fi
+    
+    # Ensure $base_os_ver is not empty
+    if [[ -z "$base_os_ver" ]]; then
+        echo "Could not determine OS version in the app installer's base image."
+        "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+        exit 26
+    fi
+    
+    echo "$base_os_ver"
 }
 
 # Run through a few pre-download checks
@@ -982,65 +1104,51 @@ if [[ ! -e "$mac_os_installer_path" ]]; then
     fi
 fi
 
-installer_app_maj_ver="$(checkOSInstallerVersion | /usr/bin/cut -d . -f 1)"
 checkOSInstaller
+
+# Determine OS installer version
+installer_app_ver="$(checkOSInstallerVersion)"
+
+# Confirm that value returned by plistbuddy is valid
+checkForPlistValue "$installer_app_ver"
+
+if [[ $? -eq 25 ]]; then
+    echo "Plistbuddy returned an empty value."
+    "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+    exit 25
+elif [[ $? -eq 27 ]]; then
+    echo "Plistbuddy is trying to read from a file that does not exist."
+    "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+    exit 27
+fi
+
+
+installer_app_major_ver="$(echo $installer_app_ver | /usr/bin/cut -d . -f 1)"
+installer_app_minor_ver="$(echo $installer_app_ver | /usr/bin/cut -d . -f 2)"
+installer_app_patch_ver="$(echo $installer_app_ver | /usr/bin/cut -d . -f 3)"
 
 # Variables reliant on installer being on disk
 min_req_os="$(/usr/libexec/PlistBuddy -c "print :LSMinimumSystemVersion" "$mac_os_installer_path"/Contents/Info.plist 2>/dev/null)"
+
+# Confirm that value returned by plistbuddy is valid
+checkForPlistValue "$min_req_os"
+
+if [[ $? -eq 25 ]]; then
+    echo "Plistbuddy returned an empty value."
+    "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+    exit 25
+elif [[ $? -eq 27 ]]; then
+    echo "Plistbuddy is trying to read from a file that does not exist."
+    "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+    exit 27
+fi
+
+
 min_req_os_maj="$(echo "$min_req_os" | /usr/bin/cut -d . -f 1)"
 min_req_os_min="$(echo "$min_req_os" | /usr/bin/cut -d . -f 2)"
 min_req_os_patch="$(echo "$min_req_os" | /usr/bin/cut -d . -f 3)"
 required_space="$(/usr/bin/du -hsg "$mac_os_installer_path/Contents/SharedSupport" | /usr/bin/awk '{print $1}')"
 needed_free_space="$(($required_space * 4))"
-
-determineBaseOSVersion (){
-    # This needs to be re-worked because of macOS 11
-    # Determine version of the OS included in the installer
-    if [[ "$installer_app_maj_ver" -ge 16 ]]; then
-        # Mount volume
-        /usr/bin/hdiutil attach -nobrowse -quiet "$mac_os_installer_path"/Contents/SharedSupport/SharedSupport.dmg
-        
-        # Path to mobile asset xml which contains path to zip containing base OS image
-        mobile_asset_xml="/Volumes/Shared Support/com_apple_MobileAsset_MacSoftwareUpdate/com_apple_MobileAsset_MacSoftwareUpdate.xml"
-        
-        # Relative path to mobile asset
-        mobile_asset="$(/usr/libexec/PlistBuddy -c "print :Assets:0:__RelativePath" "$mobile_asset_xml" 2>/dev/null)"
-        
-        checkForPlistValue "$mobile_asset"
-        
-        # Path to base image zip
-        base_image_zip="/Volumes/Shared Support/$mobile_asset"
-        
-        # Extract plist containing OS version to stdout
-        #/usr/bin/unzip -j "$base_image_zip" "Info.plist" -d "/private/tmp"
-        base_image_info_plist="$(/usr/bin/unzip -pj "$base_image_zip" "Info.plist")"
-        
-        # Determine base OS image version
-        base_os_ver="$(/usr/libexec/PlistBuddy -c "print :MobileAssetProperties:OSVersion" /dev/stdin <<<"$base_image_info_plist" 2>/dev/null)"
-        
-        # Do not forget to detach and unmount volume
-        # Determine volume name of disk image
-        volume_name="$(determineVolumeName "$mac_os_installer_path"/Contents/SharedSupport/SharedSupport.dmg)"
-        
-        # Unmount volume
-        /usr/bin/hdiutil detach -force "$volume_name"
-    else
-        # Determine base OS image version
-        base_os_ver="$(/usr/libexec/PlistBuddy -c "print :'System Image Info':version" "$mac_os_installer_path"/Contents/SharedSupport/InstallInfo.plist 2>/dev/null)"
-    fi
-    
-    # Ensure $base_os_ver is not empty
-    if [[ -z "$base_os_ver" ]]; then
-        echo "Could not determine OS version in the app installer's base image."
-        "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
-        exit 26
-    fi
-    
-    echo "$base_os_ver"
-}
-
-base_os_maj="$(determineBaseOSVersion | /usr/bin/cut -d . -f 2)"
-
 
 # Run through a few post-download checks
 checkForFreeSpace
