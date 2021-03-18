@@ -19,9 +19,12 @@
 # JAMF Pro Script Parameters:
 # Parameter 4: Optional. Number of postponements allowed. Default: 3
 # Parameter 5: Optional. Number of seconds dialog should remain up. Default: 900 seconds
-# Parameter 6: Optional. Contact email, number, or department name used in messaging.
+# Parameter 6: Optional. Number of seconds dialog should remain up for Apple Silicon Macs.
+#              Provides opportunity for user to perform update via Software Update
+#              preference pane. Default: 1 hour
+# Parameter 7: Optional. Contact email, number, or department name used in messaging.
 #              Default: IT
-# Parameter 7: Optional. Set your own custom icon. Default is Apple Software Update icon.
+# Parameter 8: Optional. Set your own custom icon. Default is Apple Software Update icon.
 #
 # Here is the expected workflow with this script:
 # If no user is logged in, the script will install updates through the command line and
@@ -85,17 +88,20 @@ DeferralPlistPath="/Library/Application Support/JAMF"
 OSMajorVersion="$(/usr/bin/sw_vers -productVersion | /usr/bin/cut -d '.' -f 1)"
 OSMinorVersion="$(/usr/bin/sw_vers -productVersion | /usr/bin/cut -d '.' -f 2)"
 OSPatchVersion="$(/usr/bin/sw_vers -productVersion | /usr/bin/cut -d '.' -f 3)"
+ArchType="$(/usr/bin/arch)"
 DeferralPlist="$DeferralPlistPath/com.custom.deferrals.plist"
 BundleID="com.apple.SoftwareUpdate"
 DeferralType="count"
 DeferralValue="${4}"
-TimeOutinSec="${5}"
-ITContact="${6}"
-AppleSUIcon="${7}"
+TimeOutinSecForForcedCLI="${5}"
+TimeOutinSecForForcedGUI="${6}"
+ITContact="${7}"
+AppleSUIcon="${8}"
 
 # Set default values
 [[ -z "$DeferralValue" ]] && DeferralValue=3
-[[ -z "$TimeOutinSec" ]] && TimeOutinSec="900"
+[[ -z "$TimeOutinSecForForcedCLI" ]] && TimeOutinSecForForcedCLI="900"
+[[ -z "$TimeOutinSecForForcedGUI" ]] && TimeOutinSecForForcedGUI="3600"
 [[ -z "$ITContact" ]] && ITContact="IT"
 
 CurrentDeferralValue="$(/usr/libexec/PlistBuddy -c "print :"$BundleID":count" "$DeferralPlist" 2>/dev/null)"
@@ -151,16 +157,26 @@ If the error persists, please contact $ITContact."
 NoACPower="The computer is currently running off battery and is not plugged into a power source."
 
 # Standard Update Message
-StandardUpdatePrompt="There is an OS update available for your Mac. Please click Continue to proceed to Software Update to run this update. If you are unable to start the process at this time, you may choose to postpone by one day.
+StandardUpdatePrompt="There is a software update available for your Mac that requires a restart. Please click Continue to proceed to Software Update to run this update. If you are unable to start the process at this time, you may choose to postpone by one day.
 
 Attempts left to postpone: $CurrentDeferralValue
 
 You may install macOS software updates at any time $SUGuide"
 
 # Forced Update Message
-ForcedUpdatePrompt="There are software updates available for your Mac that require you to restart. You have already postponed updates the maximum number of times.
+ForcedUpdatePrompt="There is a software update available for your Mac that requires you to restart. You have already postponed updates the maximum number of times.
 
 Please save your work and click 'Update' otherwise this message will disappear and the computer will restart automatically."
+
+# Forced Update Message for Apple Silicon
+ForcedUpdatePromptForAS="There is a software update available for your Mac that requires you to restart. You have already postponed updates the maximum number of times.
+
+Please save your work and install macOS software updates $SUGuide.
+
+Failure to complete the update will result in the computer shutting down."
+
+# Shutdown Warning Message
+HUDWarningMessage="Please save your work and quit all other applications. This computer will be shutting down soon."
 
 # Message shown when running CLI updates
 HUDMessage="Please save your work and quit all other applications. macOS software updates are being installed in the background. Do not turn off this computer during this time.
@@ -176,7 +192,7 @@ NoSpacePrompt="Please clear up some space by deleting files and then attempt to 
 If this error persists, please contact $ITContact."
 
 ## Functions ##
-powerCheck (){
+powerCheck() {
     # This is meant to be used when doing CLI update installs.
     # Updates through the GUI can already determine its own requirements to proceed with
     # the update process.
@@ -194,7 +210,15 @@ powerCheck (){
 }
 
 
-updateCLI (){
+updateCLI() {
+    # Behavior of softwareupdate has changed in Big Sur
+    # -ia seems to download updates and not actually install them.
+    # Use -iaR for updates to be installed.
+    # This also means that the script will restart/shutdown immediately
+    if [[ "$OSMajorVersion" -ge 11 ]]; then
+        /usr/sbin/softwareupdate -iaR --verbose 1>> "$ListOfSoftwareUpdates" 2>> "$ListOfSoftwareUpdates" &
+    fi
+    
     # Install all software updates
     /usr/sbin/softwareupdate -ia --verbose 1>> "$ListOfSoftwareUpdates" 2>> "$ListOfSoftwareUpdates" &
     
@@ -212,7 +236,7 @@ updateCLI (){
 }
 
 
-updateRestartAction (){
+updateRestartAction() {
     # On T2 hardware, we need to shutdown on certain updates
     # Verbiage found when installing updates that require a shutdown:
     #   To install these updates, your computer must shut down. Your computer will automatically start up to finish installation.
@@ -240,7 +264,7 @@ updateRestartAction (){
 }
 
 
-updateGUI (){
+updateGUI() {
     # Update through the GUI
     if [[ "$OSMajorVersion" -ge 11 ]] || [[ "$OSMajorVersion" -eq 10 && "$OSMinorVersion" -ge 14 ]]; then
         /bin/launchctl $LMethod $LID /usr/bin/open "/System/Library/CoreServices/Software Update.app"
@@ -250,7 +274,7 @@ updateGUI (){
 }
 
 
-fvStatusCheck (){
+fvStatusCheck() {
     # Check to see if the encryption process is complete
     FVStatus="$(/usr/bin/fdesetup status)"
     if [[ $(/usr/bin/grep -q "Encryption in progress" <<< "$FVStatus") ]]; then
@@ -261,13 +285,13 @@ fvStatusCheck (){
 }
 
 
-runUpdates (){
+runUpdates() {
     "$jamfHelper" -windowType hud -lockhud -title "Apple Software Update" -description "$HUDMessage""START TIME: $(/bin/date +"%b %d %Y %T")" -icon "$AppleSUIcon" &>/dev/null &
     
     ## We'll need the pid of jamfHelper to kill it once the updates are complete
     JHPID=$(echo "$!")
     
-    ## Run the jamf policy to insall software updates
+    ## Run the command to insall software updates
     SU_EC="$(updateCLI)"
     
     ## Kill the jamfHelper. If a restart is needed, the user will be prompted. If not the hud will just go away
@@ -318,6 +342,21 @@ checkForDisplaySleepAssertions() {
         
         exit 0
     fi
+}
+
+
+# Function to determine the last activity of softwareupdated
+checkSoftwareUpdateDEndTime(){
+    # Last activity for softwareupdated
+    LastSULogEndTime="$(/usr/bin/log stats --process 'softwareupdated' | /usr/bin/awk '/end:/{ gsub(/^end:[ \t]*/, "", $0); print}')"
+    LastSULogEndTimeInEpoch="$(/bin/date -jf "%a %b %d %T %Y" "$LastSULogEndTime" +"%s")"
+    
+    # Add a buffer period of time to last activity end time for softwareupdated
+    # There can be 2-3 minute gaps of inactivity 
+    # Buffer period = 3 minutes/180 seconds
+    let LastSULogEndTimeInEpochWithBuffer=$LastSULogEndTimeInEpoch+120
+    
+    echo "$LastSULogEndTimeInEpochWithBuffer"
 }
 
 # Store list of software updates in /tmp which gets cleared periodically by the OS and on restarts
@@ -371,7 +410,7 @@ else
             setDeferral "$BundleID" "$DeferralType" "$CurrTimer" "$DeferralPlist"
             
             # If someone is logged in and they have not canceled $DeferralValue times already, prompt them to install updates that require a restart and state how many more times they can press 'cancel' before updates run automatically.
-            HELPER=$("$jamfHelper" -windowType utility -icon "$AppleSUIcon" -title "Apple Software Update" -description "$StandardUpdatePrompt" -button1 "Continue" -button2 "Postpone" -cancelButton "2" -defaultButton 2 -timeout "$TimeOutinSec")
+            HELPER=$("$jamfHelper" -windowType utility -icon "$AppleSUIcon" -title "Apple Software Update" -description "$StandardUpdatePrompt" -button1 "Continue" -button2 "Postpone" -cancelButton "2" -defaultButton 2 -timeout "$TimeOutinSecForForcedCLI")
             echo "Jamf Helper Exit Code: $HELPER"
             
             # If they click "Update" then take them to the software update preference pane
@@ -382,17 +421,67 @@ else
             exit 0
         else
             powerCheck
-            HELPER=$("$jamfHelper" -windowType utility -icon "$AppleSUIcon" -title "Apple Software Update" -description "$ForcedUpdatePrompt" -button1 "Update" -defaultButton 1 -timeout "$TimeOutinSec" -countdown -alignCountdown "right")
-            echo "Jamf Helper Exit Code: $HELPER"
-            # Either they clicked "Updates" or
-            # Someone tried to quit jamfHelper or the jamfHelper screen timed out
-            # The Timer is already 0, run the updates automatically, the end user has been warned!
-            if [[ "$HELPER" -eq "0" ]] || [[ "$HELPER" -eq "239" ]]; then
-                runUpdates
-                RunUpdates_EC=$?
+            # We've reached point where updates need to be forced.
+            if [[ "$ArchType" == "arm64" ]]; then
+                # For Apple Silicon Macs, behavior needs to be changed:
+                # Ask the user to install update through GUI with shutdown warning if not completed within X time
+                # After X time has passed, check to see if update is in progress.
+                # If not in progress, force shutdown.
                 
-                if [[ $RunUpdates_EC -ne 0 ]]; then
-                    exit $RunUpdates_EC
+                # Capture start time for forced update via GUI
+                ForceUpdateStartTimeInEpoch="$(/bin/date -jf "%a %b %d %T %Z %Y" "$(/bin/date)" +"%s")"
+                
+                # Calculate scheduled end time for forced update via GUI
+                let ForceUpdateScheduledEndTimeInEpoch=$ForceUpdateStartTimeInEpoch+$TimeOutinSecForForcedGUI
+                
+                # If someone is logged in and they run out of deferrals, prompt them to install updates that require a restart via GUI with warning that shutdown will occur.
+                HELPER=$("$jamfHelper" -windowType utility -icon "$AppleSUIcon" -title "Apple Software Update" -description "$ForcedUpdatePromptForAS" -button1 "Update" -defaultButton 1 -timeout "$TimeOutinSecForForcedGUI" -countdown -alignCountdown "right")
+                echo "Jamf Helper Exit Code: $HELPER"
+                
+                # If they click "Update" then take them to the software update preference pane
+                if [ "$HELPER" -eq 0 ]; then
+                    updateGUI
+                fi
+                
+                echo "Waiting until time out period for forced GUI install has passed."
+                
+                # Wait until the time out period for forced GUI installs has passed
+                while [[ "$(/bin/date -jf "%a %b %d %T %Z %Y" "$(/bin/date)" +"%s")" -lt "$ForceUpdateScheduledEndTimeInEpoch" ]]; do
+                    sleep 60
+                done
+                
+                echo "Time out period for forced GUI install has passed."
+                echo "Waiting until softwareupdated is no longer logging any activity."
+                
+                # Compare end time of last activity of softwareupdated and if more than buffer period time has passed, proceed with shutdown
+                while [[ "$(/bin/date -jf "%a %b %d %T %Z %Y" "$(/bin/date)" +"%s")" -lt "$(checkSoftwareUpdateDEndTime)" ]]; do
+                    sleep 15
+                done
+                
+                echo "softwareupdated is no longer logging activity."
+                
+                # Let user know shutdown is taking place
+                "$jamfHelper" -windowType hud -icon "$AppleSUIcon" -title "Apple Software Update" -description "$HUDWarningMessage" -button1 "Shut Down" -defaultButton 1 -timeout "60" -countdown -alignCountdown "right" &
+                echo "Jamf Helper Exit Code: $HELPER"
+                
+                # Shutdown computer
+                /sbin/shutdown -h now
+            else
+                # For Intel Macs, an attempt to continue using CLI to install updates will be made
+                # If someone is logged in and they run out of deferrals, force install updates that require a restart via CLI
+                # Prompt users to let them initiate the CLI update via Jamf Helper dialog
+                HELPER=$("$jamfHelper" -windowType utility -icon "$AppleSUIcon" -title "Apple Software Update" -description "$ForcedUpdatePrompt" -button1 "Update" -defaultButton 1 -timeout "$TimeOutinSecForForcedCLI" -countdown -alignCountdown "right")
+                echo "Jamf Helper Exit Code: $HELPER"
+                # Either they clicked "Updates" or
+                # Someone tried to quit jamfHelper or the jamfHelper screen timed out
+                # The Timer is already 0, run the updates automatically, the end user has been warned!
+                if [[ "$HELPER" -eq "0" ]] || [[ "$HELPER" -eq "239" ]]; then
+                    runUpdates
+                    RunUpdates_EC=$?
+                    
+                    if [[ $RunUpdates_EC -ne 0 ]]; then
+                        exit $RunUpdates_EC
+                    fi
                 fi
             fi
         fi
