@@ -217,10 +217,10 @@ updateCLI() {
     # This also means that the script will restart/shutdown immediately
     if [[ "$OSMajorVersion" -ge 11 ]]; then
         /usr/sbin/softwareupdate -iaR --verbose 1>> "$ListOfSoftwareUpdates" 2>> "$ListOfSoftwareUpdates" &
+    else
+        # Install all software updates
+        /usr/sbin/softwareupdate -ia --verbose 1>> "$ListOfSoftwareUpdates" 2>> "$ListOfSoftwareUpdates" &
     fi
-    
-    # Install all software updates
-    /usr/sbin/softwareupdate -ia --verbose 1>> "$ListOfSoftwareUpdates" 2>> "$ListOfSoftwareUpdates" &
     
     ## Get the Process ID of the last command run in the background ($!) and wait for it to complete (wait)
     # If you don't wait, the computer may take a restart action before updates are finished
