@@ -1004,7 +1004,7 @@ runUpdates(){
         echo "$SpaceError"
         echo "Disk has $AvailableFreeSpace GB of free space."
         
-        "$jamfHelper" -windowType utility -icon "$AlertIcon" -title "$JamfHelperTitle Error" -description "$SpaceError Your disk has $AvailableFreeSpace GB of free space. $NoSpacePrompt" -button1 "OK" &
+        "$jamfHelper" -windowType utility -icon "$AppleSUIcon" -title "$JamfHelperTitle Error" -description "$SpaceError Your disk has $AvailableFreeSpace GB of free space. $NoSpacePrompt" -button1 "OK" &
         return 12
     fi
     
@@ -1059,7 +1059,7 @@ updateRestartAction(){
     if [[ "$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep -E "Please call halt")" || "$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep -E "your computer must shut down")" ]] && [[ "$SEPType" ]]; then
         if [[ "$OSMajorVersion" -eq 10 && "$OSMinorVersion" -eq 13 && "$OSPatchVersion" -ge 4 ]] || [[ "$OSMajorVersion" -eq 10 && "$OSMinorVersion" -ge 14 ]] || [[ "$OSMajorVersion" -ge 11 ]]; then
             # Resetting the deferral count
-            setDeferral "$BundleID" "$DeferralType" "$DeferralValue" "$DeferralPlist"
+            setPlistValue "$BundleID" "Deferral" "integer" "0" "$DeprecationPlist"
             
             echo "Restart Action: Shutdown/Halt"
             
@@ -1068,7 +1068,7 @@ updateRestartAction(){
         fi
     fi
     # Resetting the deferral count
-    setDeferral "$BundleID" "$DeferralType" "$DeferralValue" "$DeferralPlist"
+    setPlistValue "$BundleID" "Deferral" "integer" "0" "$DeprecationPlist"
     
     # If no shutdown is required then let's go ahead and restart
     echo "Restart Action: Restart"
