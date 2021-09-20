@@ -397,7 +397,7 @@ fi
 # If there is no one logged in, let's try to run the updates.
 if [[ "$LoggedInUser" == "" ]]; then
     powerCheck
-    updateCLI &>/dev/null
+    # updateCLI &>/dev/null # commented out as updateCLI is no longer working.
     updateRestartAction
 else
     checkForDisplaySleepAssertions
