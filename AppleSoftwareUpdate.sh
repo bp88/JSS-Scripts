@@ -394,11 +394,15 @@ if [[ "$UpdatesNoRestart" == "" ]] && [[ "$RestartRequired" == "" ]]; then
 fi
 
 # If we get to this point, there are updates available.
-# If there is no one logged in, let's try to run the updates.
+# If there is no one logged in, exit until the next run.
 if [[ "$LoggedInUser" == "" ]]; then
-    powerCheck
-    # updateCLI &>/dev/null # commented out as updateCLI is no longer working.
-    updateRestartAction
+    # Commented out as CLI updates no longer work properly.
+    # powerCheck
+    # updateCLI &>/dev/null
+    # updateRestartAction
+
+    echo "No user is currently logged in."
+    exit 0
 else
     checkForDisplaySleepAssertions
     
