@@ -422,68 +422,51 @@ else
         else
             powerCheck
             # We've reached point where updates need to be forced.
-            if [[ "$ArchType" == "arm64" ]]; then
-                # For Apple Silicon Macs, behavior needs to be changed:
-                # Ask the user to install update through GUI with shutdown warning if not completed within X time
-                # After X time has passed, check to see if update is in progress.
-                # If not in progress, force shutdown.
-                
-                # Capture start time for forced update via GUI
-                ForceUpdateStartTimeInEpoch="$(/bin/date -jf "%a %b %d %T %Z %Y" "$(/bin/date)" +"%s")"
-                
-                # Calculate scheduled end time for forced update via GUI
-                let ForceUpdateScheduledEndTimeInEpoch=$ForceUpdateStartTimeInEpoch+$TimeOutinSecForForcedGUI
-                
-                # If someone is logged in and they run out of deferrals, prompt them to install updates that require a restart via GUI with warning that shutdown will occur.
-                HELPER=$("$jamfHelper" -windowType utility -icon "$AppleSUIcon" -title "Apple Software Update" -description "$ForcedUpdatePromptForAS" -button1 "Update" -defaultButton 1 -timeout "$TimeOutinSecForForcedGUI" -countdown -alignCountdown "right")
-                echo "Jamf Helper Exit Code: $HELPER"
-                
-                # If they click "Update" then take them to the software update preference pane
-                if [ "$HELPER" -eq 0 ]; then
-                    updateGUI
-                fi
-                
-                echo "Waiting until time out period for forced GUI install has passed."
-                
-                # Wait until the time out period for forced GUI installs has passed
-                while [[ "$(/bin/date -jf "%a %b %d %T %Z %Y" "$(/bin/date)" +"%s")" -lt "$ForceUpdateScheduledEndTimeInEpoch" ]]; do
-                    sleep 60
-                done
-                
-                echo "Time out period for forced GUI install has passed."
-                echo "Waiting until softwareupdated is no longer logging any activity."
-                
-                # Compare end time of last activity of softwareupdated and if more than buffer period time has passed, proceed with shutdown
-                while [[ "$(/bin/date -jf "%a %b %d %T %Z %Y" "$(/bin/date)" +"%s")" -lt "$(checkSoftwareUpdateDEndTime)" ]]; do
-                    sleep 15
-                done
-                
-                echo "softwareupdated is no longer logging activity."
-                
-                # Let user know shutdown is taking place
-                "$jamfHelper" -windowType hud -icon "$AppleSUIcon" -title "Apple Software Update" -description "$HUDWarningMessage" -button1 "Shut Down" -defaultButton 1 -timeout "60" -countdown -alignCountdown "right" &
-                echo "Jamf Helper Exit Code: $HELPER"
-                
-                # Shutdown computer
-                /sbin/shutdown -h now
-            else
-                # For Intel Macs, an attempt to continue using CLI to install updates will be made
-                # If someone is logged in and they run out of deferrals, force install updates that require a restart via CLI
-                # Prompt users to let them initiate the CLI update via Jamf Helper dialog
-                HELPER=$("$jamfHelper" -windowType utility -icon "$AppleSUIcon" -title "Apple Software Update" -description "$ForcedUpdatePrompt" -button1 "Update" -defaultButton 1 -timeout "$TimeOutinSecForForcedCLI" -countdown -alignCountdown "right")
-                echo "Jamf Helper Exit Code: $HELPER"
-                # Either they clicked "Updates" or
-                # Someone tried to quit jamfHelper or the jamfHelper screen timed out
-                # The Timer is already 0, run the updates automatically, the end user has been warned!
-                if [[ "$HELPER" -eq "0" ]] || [[ "$HELPER" -eq "239" ]]; then
-                    runUpdates
-                    RunUpdates_EC=$?
-                    
-                    if [[ $RunUpdates_EC -ne 0 ]]; then
-                        exit $RunUpdates_EC
-                    fi
-                fi
+            
+            # For Apple Silicon Macs and recent versions of MacOS on Intel Macs, behavior needs to be changed:
+            # Ask the user to install update through GUI with shutdown warning if not completed within X time
+            # After X time has passed, check to see if update is in progress.
+            # If not in progress, force shutdown.
+            
+            # Capture start time for forced update via GUI
+            ForceUpdateStartTimeInEpoch="$(/bin/date -jf "%a %b %d %T %Z %Y" "$(/bin/date)" +"%s")"
+            
+            # Calculate scheduled end time for forced update via GUI
+            let ForceUpdateScheduledEndTimeInEpoch=$ForceUpdateStartTimeInEpoch+$TimeOutinSecForForcedGUI
+            
+            # If someone is logged in and they run out of deferrals, prompt them to install updates that require a restart via GUI with warning that shutdown will occur.
+            HELPER=$("$jamfHelper" -windowType utility -icon "$AppleSUIcon" -title "Apple Software Update" -description "$ForcedUpdatePromptForAS" -button1 "Update" -defaultButton 1 -timeout "$TimeOutinSecForForcedGUI" -countdown -alignCountdown "right")
+            echo "Jamf Helper Exit Code: $HELPER"
+            
+            # If they click "Update" then take them to the software update preference pane
+            if [ "$HELPER" -eq 0 ]; then
+                updateGUI
             fi
+            
+            echo "Waiting until time out period for forced GUI install has passed."
+            
+            # Wait until the time out period for forced GUI installs has passed
+            while [[ "$(/bin/date -jf "%a %b %d %T %Z %Y" "$(/bin/date)" +"%s")" -lt "$ForceUpdateScheduledEndTimeInEpoch" ]]; do
+                sleep 60
+            done
+            
+            echo "Time out period for forced GUI install has passed."
+            echo "Waiting until softwareupdated is no longer logging any activity."
+            
+            # Compare end time of last activity of softwareupdated and if more than buffer period time has passed, proceed with shutdown
+            while [[ "$(/bin/date -jf "%a %b %d %T %Z %Y" "$(/bin/date)" +"%s")" -lt "$(checkSoftwareUpdateDEndTime)" ]]; do
+                sleep 15
+            done
+            
+            echo "softwareupdated is no longer logging activity."
+            
+            # Let user know shutdown is taking place
+            "$jamfHelper" -windowType hud -icon "$AppleSUIcon" -title "Apple Software Update" -description "$HUDWarningMessage" -button1 "Shut Down" -defaultButton 1 -timeout "60" -countdown -alignCountdown "right" &
+            echo "Jamf Helper Exit Code: $HELPER"
+            
+            # Shutdown computer
+            /sbin/shutdown -h now
+
         fi
     fi
 fi
