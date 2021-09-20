@@ -354,7 +354,7 @@ checkSoftwareUpdateDEndTime(){
     # Add a buffer period of time to last activity end time for softwareupdated
     # There can be 2-3 minute gaps of inactivity 
     # Buffer period = 3 minutes/180 seconds
-    let LastSULogEndTimeInEpochWithBuffer=$LastSULogEndTimeInEpoch+120
+    let LastSULogEndTimeInEpochWithBuffer=$LastSULogEndTimeInEpoch+180
     
     echo "$LastSULogEndTimeInEpochWithBuffer"
 }
@@ -424,7 +424,7 @@ else
             
             exit 0
         else
-            powerCheck
+            # powerCheck
             # We've reached point where updates need to be forced.
             
             # For Apple Silicon Macs and recent versions of MacOS on Intel Macs, behavior needs to be changed:
