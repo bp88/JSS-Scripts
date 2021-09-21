@@ -192,22 +192,6 @@ NoSpacePrompt="Please clear up some space by deleting files and then attempt to 
 If this error persists, please contact $ITContact."
 
 ## Functions ##
-powerCheck() {
-    # This is meant to be used when doing CLI update installs.
-    # Updates through the GUI can already determine its own requirements to proceed with
-    # the update process.
-    # Let's wait 5 minutes to see if computer gets plugged into power.
-    for (( i = 1; i <= 5; ++i )); do
-        if [[ "$(/usr/bin/pmset -g ps | /usr/bin/grep "Battery Power")" = "Now drawing from 'Battery Power'" ]] && [[ $i = 5 ]]; then
-            echo "$NoACPower"
-        elif [[ "$(/usr/bin/pmset -g ps | /usr/bin/grep "Battery Power")" = "Now drawing from 'Battery Power'" ]]; then
-            /bin/sleep 60
-        else
-            return 0
-        fi
-    done
-    exit 11
-}
 
 updateGUI() {
     # Update through the GUI
@@ -217,7 +201,6 @@ updateGUI() {
         /bin/launchctl $LMethod $LID /usr/bin/open macappstore://showUpdatesPage
     fi
 }
-
 
 fvStatusCheck() {
     # Check to see if the encryption process is complete
@@ -377,7 +360,6 @@ fi
 # Future Fix: Might want to see if Safari and iTunes are running as sometimes these apps sometimes do not require a restart but do require that the apps be closed
 # A simple stop gap to see if either process is running.
 if [[ "$UpdatesNoRestart" != "" ]] && [[ ! "$(/bin/ps -axc | /usr/bin/grep -e Safari$)" ]] && [[ ! "$(/bin/ps -axc | /usr/bin/grep -e iTunes$)" ]]; then
-    powerCheck
     updateGUI
 fi
 
