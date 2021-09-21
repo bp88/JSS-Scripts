@@ -209,61 +209,6 @@ powerCheck() {
     exit 11
 }
 
-
-updateCLI() {
-    # Behavior of softwareupdate has changed in Big Sur
-    # -ia seems to download updates and not actually install them.
-    # Use -iaR for updates to be installed.
-    # This also means that the script will restart/shutdown immediately
-    if [[ "$OSMajorVersion" -ge 11 ]]; then
-        /usr/sbin/softwareupdate -iaR --verbose 1>> "$ListOfSoftwareUpdates" 2>> "$ListOfSoftwareUpdates" &
-    else
-        # Install all software updates
-        /usr/sbin/softwareupdate -ia --verbose 1>> "$ListOfSoftwareUpdates" 2>> "$ListOfSoftwareUpdates" &
-    fi
-    
-    ## Get the Process ID of the last command run in the background ($!) and wait for it to complete (wait)
-    # If you don't wait, the computer may take a restart action before updates are finished
-    SUPID=$(echo "$!")
-    
-    wait $SUPID
-    
-    SU_EC=$?
-    
-    echo $SU_EC
-    
-    return $SU_EC
-}
-
-
-updateRestartAction() {
-    # On T2 hardware, we need to shutdown on certain updates
-    # Verbiage found when installing updates that require a shutdown:
-    #   To install these updates, your computer must shut down. Your computer will automatically start up to finish installation.
-    #   Installation will not complete successfully if you choose to restart your computer instead of shutting down.
-    #   Please call halt(8) or select Shut Down from the Apple menu. To automate the shutdown process with softwareupdate(8), use --restart.
-    if [[ "$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep -E "Please call halt")" || "$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep -E "your computer must shut down")" ]] && [[ "$SEPType" ]]; then
-        if [[ "$OSMajorVersion" -eq 10 && "$OSMinorVersion" -eq 13 && "$OSPatchVersion" -ge 4 ]] || [[ "$OSMajorVersion" -eq 10 && "$OSMinorVersion" -ge 14 ]] || [[ "$OSMajorVersion" -ge 11 ]]; then
-            # Resetting the deferral count
-            setDeferral "$BundleID" "$DeferralType" "$DeferralValue" "$DeferralPlist"
-            
-            echo "Restart Action: Shutdown/Halt"
-            
-            /sbin/shutdown -h now
-            exit 0
-        fi
-    fi
-    # Resetting the deferral count
-    setDeferral "$BundleID" "$DeferralType" "$DeferralValue" "$DeferralPlist"
-    
-    # If no shutdown is required then let's go ahead and restart
-    echo "Restart Action: Restart"
-    
-    /sbin/shutdown -r now
-    exit 0
-}
-
-
 updateGUI() {
     # Update through the GUI
     if [[ "$OSMajorVersion" -ge 11 ]] || [[ "$OSMajorVersion" -eq 10 && "$OSMinorVersion" -ge 14 ]]; then
@@ -379,10 +324,8 @@ else
             
             exit 0
         else
-            # powerCheck
             # We've reached point where updates need to be forced.
             
-            # For Apple Silicon Macs and recent versions of MacOS on Intel Macs, behavior needs to be changed:
             # Ask the user to install update through GUI with shutdown warning if not completed within X time
             # After X time has passed, check to see if update is in progress.
             # If not in progress, force shutdown.
@@ -435,7 +378,7 @@ fi
 # A simple stop gap to see if either process is running.
 if [[ "$UpdatesNoRestart" != "" ]] && [[ ! "$(/bin/ps -axc | /usr/bin/grep -e Safari$)" ]] && [[ ! "$(/bin/ps -axc | /usr/bin/grep -e iTunes$)" ]]; then
     powerCheck
-    updateCLI &>/dev/null
+    updateGUI
 fi
 
 exit 0
