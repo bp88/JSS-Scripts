@@ -284,45 +284,6 @@ fvStatusCheck() {
     fi
 }
 
-
-runUpdates() {
-    "$jamfHelper" -windowType hud -lockhud -title "Apple Software Update" -description "$HUDMessage""START TIME: $(/bin/date +"%b %d %Y %T")" -icon "$AppleSUIcon" &>/dev/null &
-    
-    ## We'll need the pid of jamfHelper to kill it once the updates are complete
-    JHPID=$(echo "$!")
-    
-    ## Run the command to insall software updates
-    SU_EC="$(updateCLI)"
-    
-    ## Kill the jamfHelper. If a restart is needed, the user will be prompted. If not the hud will just go away
-    /bin/kill -s KILL "$JHPID" &>/dev/null
-    
-    # softwareupdate does not exit with error when insufficient space is detected
-    # which is why we need to get ahead of that error
-    if [[ "$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep -E "Not enough free disk space")" ]]; then
-        SpaceError=$(echo "$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep -E "Not enough free disk space" | /usr/bin/tail -n 1)")
-        AvailableFreeSpace=$(/bin/df -g / | /usr/bin/awk '(NR == 2){print $4}')
-        
-        echo "$SpaceError"
-        echo "Disk has $AvailableFreeSpace GB of free space."
-        
-        "$jamfHelper" -windowType utility -icon "$AlertIcon" -title "Apple Software Update Error" -description "$SpaceError Your disk has $AvailableFreeSpace GB of free space. $NoSpacePrompt" -button1 "OK" &
-        return 15
-    fi
-    
-    if [[ "$SU_EC" -eq 0 ]]; then
-        updateRestartAction
-    else
-        echo "/usr/bin/softwareupdate failed. Exit Code: $SU_EC"
-        
-        "$jamfHelper" -windowType utility -icon "$AppleSUIcon" -title "Apple Software Update" -description "$ContactMsg" -button1 "OK" &
-        return 12
-    fi
-    
-    exit 0
-}
-
-
 # Function to do best effort check if using presentation or web conferencing is active
 checkForDisplaySleepAssertions() {
     Assertions="$(/usr/bin/pmset -g assertions | /usr/bin/awk '/NoDisplaySleepAssertion | PreventUserIdleDisplaySleep/ && match($0,/\(.+\)/) && ! /coreaudiod/ {gsub(/^\ +/,"",$0); print};')"
