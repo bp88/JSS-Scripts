@@ -305,7 +305,6 @@ checkForDisplaySleepAssertions() {
     fi
 }
 
-
 # Function to determine the last activity of softwareupdated
 checkSoftwareUpdateDEndTime(){
     # Last activity for softwareupdated
@@ -357,11 +356,6 @@ fi
 # If we get to this point, there are updates available.
 # If there is no one logged in, exit until the next run.
 if [[ "$LoggedInUser" == "" ]]; then
-    # Commented out as CLI updates no longer work properly.
-    # powerCheck
-    # updateCLI &>/dev/null
-    # updateRestartAction
-
     echo "No user is currently logged in."
     exit 0
 else
