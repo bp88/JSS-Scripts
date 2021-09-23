@@ -148,14 +148,6 @@ else
  > App Store > Updates tab"
 fi
 
-# Message to let user to contact IT
-ContactMsg="There seems to have been an error installing the updates. You can try again $SUGuide
-
-If the error persists, please contact $ITContact."
-
-# Message to display when computer is running off battery
-NoACPower="The computer is currently running off battery and is not plugged into a power source."
-
 # Standard Update Message
 StandardUpdatePrompt="There is a software update available for your Mac that requires a restart. Please click Continue to proceed to Software Update to run this update. If you are unable to start the process at this time, you may choose to postpone by one day.
 
@@ -163,13 +155,8 @@ Attempts left to postpone: $CurrentDeferralValue
 
 You may install macOS software updates at any time $SUGuide"
 
-# Forced Update Message
-ForcedUpdatePrompt="There is a software update available for your Mac that requires you to restart. You have already postponed updates the maximum number of times.
-
-Please save your work and click 'Update' otherwise this message will disappear and the computer will restart automatically."
-
 # Forced Update Message for Apple Silicon
-ForcedUpdatePromptForAS="There is a software update available for your Mac that requires you to restart. You have already postponed updates the maximum number of times.
+ForcedUpdatePrompt="There is a software update available for your Mac that requires you to restart. You have already postponed updates the maximum number of times.
 
 Please save your work and install macOS software updates $SUGuide.
 
@@ -177,19 +164,6 @@ Failure to complete the update will result in the computer shutting down."
 
 # Shutdown Warning Message
 HUDWarningMessage="Please save your work and quit all other applications. This computer will be shutting down soon."
-
-# Message shown when running CLI updates
-HUDMessage="Please save your work and quit all other applications. macOS software updates are being installed in the background. Do not turn off this computer during this time.
-
-This message will go away when updates are complete and closing it will not stop the update process.
-
-If you feel too much time has passed, please contact $ITContact.
-
-"
-#Out of Space Message
-NoSpacePrompt="Please clear up some space by deleting files and then attempt to do the update $SUGuide.
-
-If this error persists, please contact $ITContact."
 
 ## Functions ##
 
@@ -320,7 +294,7 @@ else
             let ForceUpdateScheduledEndTimeInEpoch=$ForceUpdateStartTimeInEpoch+$TimeOutinSecForForcedGUI
             
             # If someone is logged in and they run out of deferrals, prompt them to install updates that require a restart via GUI with warning that shutdown will occur.
-            HELPER=$("$jamfHelper" -windowType utility -icon "$AppleSUIcon" -title "Apple Software Update" -description "$ForcedUpdatePromptForAS" -button1 "Update" -defaultButton 1 -timeout "$TimeOutinSecForForcedGUI" -countdown -alignCountdown "right")
+            HELPER=$("$jamfHelper" -windowType utility -icon "$AppleSUIcon" -title "Apple Software Update" -description "$ForcedUpdatePrompt" -button1 "Update" -defaultButton 1 -timeout "$TimeOutinSecForForcedGUI" -countdown -alignCountdown "right")
             echo "Jamf Helper Exit Code: $HELPER"
             
             # If they click "Update" then take them to the software update preference pane
