@@ -248,7 +248,7 @@ If the error persists, please contact $ITContact."
 ########### End Of Variables You Can Modify ###########
 
 ###### ACTUAL WORKING CODE  BELOW #######
-setPlistValue (){
+setPlistValue(){
     # Notes: PlistBuddy "print" will print stderr to stdout when file is not found.
     #   File Doesn't Exist, Will Create: /path/to/file.plist
     # There is some unused code here with the idea that at some point in the future I can
@@ -309,7 +309,7 @@ readPlistValue(){
     return 1
 }
 
-checkParam (){
+checkParam(){
 if [[ -z "$1" ]]; then
     /bin/echo "\$$2 is empty and required. Please fill in the JSS parameter correctly."
     exit 10
@@ -712,10 +712,10 @@ isPassEndDate(){
             exit 0
         fi
         
-        updateGUI
-        
         # Set next reminder to 24 hours to provide user time to update via GUI
         setNextReminderTime
+        
+        updateGUI
         
         exit 0
     fi
@@ -751,11 +751,11 @@ After $EndDateString, an $addMajorUpgradeText will be required on this computer.
             exit 0
         fi
         
-        # Opening Software Update
-        updateGUI
-        
         # Set next reminder to 1 hour to provide user time to update via GUI
         setNextReminderTime "3600"
+        
+        # Opening Software Update
+        updateGUI
         
         exit 0
     fi
@@ -791,16 +791,26 @@ isReadyForReminder(){
         
         # User decided to ask for More Info
         if [[ "$ButtonClicked" == "2" ]]; then
-            echo "User opted to be reminded later."
+            echo "User opted to get more info."
             openMoreInfoURL
             
             incrementTimesIgnored
+            
+            # Restarting policy now that the user has more info
+            # Expectation is for user to pick time and click Proceed
+#             "$jamf" policy -event "$CustomTriggerNameDeprecationPolicy"
+#             exit 0
         fi
         
         # User decided to proceed with OS update immediately or dialog timed out
         if [[ "$ButtonClicked" == "1" ]] && [[ -z "$TimeChosen" ]]; then
             echo "User selected to start OS update immediately."
+            
+            # Set next reminder time for 1 hour to allow installer to run
+            setNextReminderTime "3600"
+            
             updateGUI
+            
             exit 0
         fi
         
@@ -840,6 +850,23 @@ checkLogEndTime(){
     echo "$LastLogEndTimeInEpochWithBuffer"
 }
 
+refreshSoftwareUpdateList(){
+    # Restart the softwareupdate daemon to ensure latest updates are being picked up
+    /bin/launchctl kickstart -k system/com.apple.softwareupdated
+    
+    # Allow a few seconds for daemon to startup
+    /bin/sleep 3
+    
+    # Store list of software updates in /tmp which gets cleared periodically by the OS and on restarts
+    /usr/sbin/softwareupdate -l 2>&1 > "$ListOfSoftwareUpdates"
+    
+    setPlistValue "$BundleID" "LastUpdateCheckEpochTime" "integer" "$CurrentRunEpochTime" "$DeprecationPlist"
+    
+    # Variables to capture whether updates require a restart or not
+    UpdatesNoRestart=$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep -i recommended | /usr/bin/grep -v -i restart | /usr/bin/cut -d , -f 1 | /usr/bin/sed -e 's/^[[:space:]]*//' | /usr/bin/sed -e 's/^Title:\ *//')
+    RestartRequired=$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep -i restart | /usr/bin/grep -v '\*' | /usr/bin/cut -d , -f 1 | /usr/bin/sed -e 's/^[[:space:]]*//' | /usr/bin/sed -e 's/^Title:\ *//')
+}
+
 checkForSoftwareUpdates(){
     # To avoid checking for updates at every check-in
     # Track the last time an update was checked
@@ -852,18 +879,38 @@ checkForSoftwareUpdates(){
     # If more than 4 hours have passed, check for updates again
     let TimeDiff=$CurrentRunEpochTime-$LastUpdateCheckEpochTime
     if [[ ! -e "$ListOfSoftwareUpdates" ]] || [[ $TimeDiff -gt 14400 ]] || [[ $LastUpdateCheckEpochTime -eq 0 ]]; then
-        # Store list of software updates in /tmp which gets cleared periodically by the OS and on restarts
-        /usr/sbin/softwareupdate -l 2>&1 > "$ListOfSoftwareUpdates"
-        setPlistValue "$BundleID" "LastUpdateCheckEpochTime" "integer" "$CurrentRunEpochTime" "$DeprecationPlist"
+        refreshSoftwareUpdateList
     fi
     
     UpdatesNoRestart=$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep -i recommended | /usr/bin/grep -v -i restart | /usr/bin/cut -d , -f 1 | /usr/bin/sed -e 's/^[[:space:]]*//' | /usr/bin/sed -e 's/^Title:\ *//')
     RestartRequired=$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep -i restart | /usr/bin/grep -v '\*' | /usr/bin/cut -d , -f 1 | /usr/bin/sed -e 's/^[[:space:]]*//' | /usr/bin/sed -e 's/^Title:\ *//')
     
     # Install updates that do not require a restart
-    # A simple stop gap to see if either process is running.
-    if [[ "$UpdatesNoRestart" && -z "$RestartRequired" ]] && [[ ! "$(/bin/ps -axc | /usr/bin/grep -e Safari$)" ]] && [[ ! "$(/bin/ps -axc | /usr/bin/grep -e iTunes$)" ]]; then
-        updateCLI &>/dev/null
+    # A simple stop gap to see if either Safari or iTunes process is running.
+    if [[ "$UpdatesNoRestart" && -z "$RestartRequired" ]]; then
+        if [[ "$(/bin/ps -axc | /usr/bin/grep -e Safari$)" ]]; then
+            echo "Safari is running. Will not attempt to install software update that does not require restart."
+            exit 0
+        fi
+        if [[ "$(/bin/ps -axc | /usr/bin/grep -e iTunes$)" ]]; then
+            echo "iTunes is running. Will not attempt to install software update that does not require restart."
+            exit 0
+        fi
+        
+        echo "Attempting install of software update that does not require restart."
+        
+        # Capture value of CLI install of updates
+        SU_EC="$(updateCLI)"
+        
+        if [[ "$SU_EC" -ne 0 ]]; then
+            echo "Attempt to install software update(s) that did not require restart failed."
+            echo "/usr/bin/softwareupdate failed. Exit Code: $SU_EC"
+        fi
+        
+        # Refresh software update list now that updates have been installed silently in the background
+        refreshSoftwareUpdateList
+        
+        exit 0
     fi
     
     # Exit if no updates are available
@@ -967,7 +1014,7 @@ forceSoftwareUpdate(){
         # For Intel Macs, an attempt to continue using CLI to install updates will be made
         # If someone is logged in and they run out of deferrals, force install updates that require a restart via CLI
         # Prompt users to let them initiate the CLI update via Jamf Helper dialog
-        Helper=$("$jamfHelper" -windowType utility -icon "$AppleSUIcon" -title "$JamfHelperTitle" -description "$FinalCallNotificationForCLIUpdate" -button1 "Update" -defaultButton 1 -timeout "$TimeOutinSecForForcedCLI" -countdown -alignCountdown "right")
+        Helper=$("$jamfHelper" -windowType utility -icon "$AppleSUIcon" -title "$JamfHelperTitle" -description "$FinalCallNotificationForCLIUpdate" -button1 "Proceed" -defaultButton 1 -timeout "$TimeOutinSecForForcedCLI" -countdown -alignCountdown "right")
         echo "Jamf Helper Exit Code: $Helper"
         # Either they clicked "Updates" or
         # Someone tried to quit jamfHelper or the jamfHelper screen timed out
