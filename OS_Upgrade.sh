@@ -67,6 +67,10 @@
 # 25: Could not determine plist value. Plistbuddy returned an empty value.
 # 26: Could not determine OS version in the app installer's base image.
 # 27: Could not determine plist value. Plistbuddy is trying to read from a file that does not exist.
+# 28: Could not mount SharedSupport.dmg
+# 29: Could not read the mobile asset xml from the mounted SharedSupport.dmg
+# 30: Could not read the OS version from the base image info.plist.
+# 31: Invalid OS version value retrieved from the base image info.plist.
 
 # Variables to determine paths, OS version, disk space, and power connection. Do not edit.
 os_ver="$(/usr/bin/sw_vers -productVersion)"
@@ -126,7 +130,7 @@ if [[ -z "$it_contact" ]]; then
     it_contact="IT"
 fi
 
-adequate_free_space_for_install_dialog="$app_name is currently downloading. The installation process will begin once the download is complete. Please close all applications."
+download_in_progress_dialog="$app_name is currently downloading. The installation process will begin once the download is complete. Please close all applications."
 no_ac_power="The computer is not plugged into a power source. Please plug it into a power source and start the installation again."
 inprogress="The upgrade to $app_name is now in progress.  Quit all your applications. The computer will restart automatically and you may be prompted to enter your username and password. Once you have authenticated, you can step away for about $time minutes. Do not shutdown or unplug from power during this process."
 download_error="The download of macOS has failed. Installation will not proceed. Please contact $it_contact."
@@ -176,19 +180,19 @@ compareLooseVersion (){
     first_ver="${1}"
     second_ver="${2}"
     
-    first_ver_maj=$(echo $first_ver | /usr/bin/cut -d . -f 1)
-    second_ver_maj=$(echo $second_ver | /usr/bin/cut -d . -f 1)
+    first_ver_maj="$(echo $first_ver | /usr/bin/cut -d . -f 1)"
+    second_ver_maj="$(echo $second_ver | /usr/bin/cut -d . -f 1)"
     
-    first_ver_min=$(echo $first_ver | /usr/bin/cut -d . -f 2)
+    first_ver_min="$(echo $first_ver | /usr/bin/cut -d . -f 2)"
     [[ -z "$first_ver_min" ]] && first_ver_min="0"
     
-    second_ver_min=$(echo $second_ver | /usr/bin/cut -d . -f 2)
+    second_ver_min="$(echo $second_ver | /usr/bin/cut -d . -f 2)"
     [[ -z "$second_ver_min" ]] && second_ver_min="0"
     
-    first_ver_patch=$(echo $first_ver | /usr/bin/cut -d . -f 3)
+    first_ver_patch="$(echo $first_ver | /usr/bin/cut -d . -f 3)"
     [[ -z "$first_ver_patch" ]] && first_ver_patch="0"
     
-    second_ver_patch=$(echo $second_ver | /usr/bin/cut -d . -f 3)
+    second_ver_patch="$(echo $second_ver | /usr/bin/cut -d . -f 3)"
     [[ -z "$second_ver_patch" ]] && second_ver_patch="0"
     
     if [[ $first_ver_maj -gt $second_ver_maj ]] ||
@@ -293,10 +297,10 @@ fvAuthRestart (){
     # Get information necessary to display messages in the current user's context.
     user_id=$(/usr/bin/id -u "$logged_in_user")
     if [[ "$os_major_ver" -eq 10 && "$os_minor_ver" -le 9 ]]; then
-        l_id=$(pgrep -x -u "$user_id" loginwindow)
+        l_id=$(/usr/bin/pgrep -x -u "$user_id" loginwindow)
         l_method="bsexec"
     elif [[ "$os_major_ver" -ge 11 || "$os_major_ver" -eq 10 && "$os_minor_ver" -gt 9 ]]; then
-        l_id=$user_id
+        l_id="$user_id"
         l_method="asuser"
     fi
     
@@ -323,11 +327,11 @@ fvAuthRestart (){
     echo "Successfully prompted for Filevault password."
     
     # Translate XML reserved characters to XML friendly representations.
-    user_pw=${user_pw//&/&amp;}
-    user_pw=${user_pw//</&lt;}
-    user_pw=${user_pw//>/&gt;}
-    user_pw=${user_pw//\"/&quot;}
-    user_pw=${user_pw//\'/&apos;}
+    user_pw_xml=${user_pw//&/&amp;}
+    user_pw_xml=${user_pw_xml//</&lt;}
+    user_pw_xml=${user_pw_xml//>/&gt;}
+    user_pw_xml=${user_pw_xml//\"/&quot;}
+    user_pw_xml=${user_pw_xml//\'/&apos;}
     
     echo "Setting up authenticated restart..."
     FDESETUP_OUTPUT="$(/usr/bin/fdesetup authrestart -delayminutes -1 -verbose -inputplist << EOF
@@ -338,7 +342,7 @@ fvAuthRestart (){
     <key>Username</key>
     <string>$logged_in_user</string>
     <key>Password</key>
-    <string>$user_pw</string>
+    <string>$user_pw_xml</string>
 </dict>
 </plist>
 EOF
@@ -348,7 +352,7 @@ EOF
     fdesetup_result=$?
     
     # Clear password variable.
-    unset user_pw
+    unset user_pw_xml
     
     if [[ $fdesetup_result -ne 0 ]]; then
         echo "$FDESETUP_OUTPUT"
@@ -370,10 +374,17 @@ downloadOSInstaller (){
     "$jamf" recon
     
     if [[ -n "$custom_trigger_policy_name" ]]; then
-        "$jamfHelper" -windowType hud -lockhud -title "$app_name (1 of 2)" -description "$adequate_free_space_for_install_dialog" -icon "$downloadicon" &
+        "$jamfHelper" -windowType hud -lockhud -title "$app_name (1 of 2)" -description "$download_in_progress_dialog" -icon "$downloadicon" &
         JHPID=$(echo "$!")
         
         "$jamf" policy -event "$custom_trigger_policy_name" -randomDelaySeconds 0
+        
+        if [[ $? -ne 0 ]]; then
+            /bin/kill -s KILL "$JHPID" > /dev/null 1>&2
+            echo "Jamf policy did not complete successfully."
+            "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$download_error" -button1 "Exit" -defaultButton 1 &
+            exit 25
+        fi
         
         /bin/kill -s KILL "$JHPID" > /dev/null 1>&2
     else
@@ -384,11 +395,16 @@ downloadOSInstaller (){
 }
 
 redownloadOSInstaller (){
-    echo "Cannot find $mac_os_installer_path. Clearing JAMF Downloads/Waiting Room in case there's a bad download and trying again."
+    echo "Clearing JAMF Downloads/Waiting Room in case there's a bad download and trying again."
     /bin/rm -rf "/Library/Application Support/JAMF/Downloads/"
     /bin/rm -rf "/Library/Application Support/JAMF/Waiting Room/"
     
+    echo "Clearing $$mac_os_installer_path in case application path is incomplete."
+    /bin/rm -rf "$mac_os_installer_path"
+    
     downloadOSInstaller
+    
+    return $?
 }
 
 checkOSInstallerVersion (){
@@ -548,34 +564,16 @@ checkMinReqOSVer (){
 
 # Function to check if a required minimum macOS app installer has been supplied
 meetsApprovedMinimumOSInstallerVersion (){
-    # Check to see if minimum required app installer's OS version has been supplied
-    if [[ -z "$approved_min_os_app_ver" ]]; then
-        echo "Minimum OS app version has not been supplied. Skipping check."
-        
-        return 0
-    fi
-    
     if [[ "$approved_min_os_app_ver" =~ ^[0-9]+[\.]{1}[0-9]+[\.]{0,1}[0-9]*$ ]]; then
-        CompareResult="$(compareLooseVersion "$(determineBaseOSVersion)" "$approved_min_os_app_ver")"
+        CompareResult="$(compareLooseVersion "$base_os_ver" "$approved_min_os_app_ver")"
         
         if [[ "$CompareResult" = "False" ]]; then
             echo "The macOS installer app version is $base_os_ver. The system admin has set a minimum version requirement of $approved_min_os_app_ver for macOS installers."
             echo "Minimum required macOS installer app version is greater than the version of the macOS installer on the client."
-            echo "Attempting to download the latest macOS installer."
-            downloadOSInstaller
-            
-            if [[ "$?" = 0 ]]; then
-                CompareResult="$(compareLooseVersion "$(determineBaseOSVersion)" "$approved_min_os_app_ver")"
-                
-                if [[ "$CompareResult" = "False" ]]; then
-                    echo "Looks like the download attempt failed."
-                    echo "Minimum required macOS installer app version is still greater than the version on the client."
-                    echo "Please install the macOS installer app version that meets the minimum requirement set."
-                    echo "Alternatively, you can modify or remove the minimum macOS installer app version requirement."
-                    "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
-                    exit 8
-                fi
-            fi
+            echo "Please install the macOS installer app version that meets the minimum requirement set."
+            echo "Alternatively, you can modify or remove the minimum macOS installer app version requirement."
+            "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+            exit 8
         elif [[ "$CompareResult" = "True" ]]; then
             echo "Minimum required macOS installer app version is greater than the version on the client."
         fi
@@ -803,63 +801,132 @@ installCommand (){
 #     disableInstallAssistantRestartPref
     
     JHPID="$1"
-    log="$2"
+    install_log="$2"
+    running_apple_silicon="$3"
+    
+    if [[ "$running_apple_silicon" == 1 ]]; then
+        # Installer for macOS Big Sur introduce ability to pass credentials through new options
+        # Required for authorizing installations on Apple Silicon and volume ownership
+        # --user, an admin user to authorize installation.
+        # --stdinpass, collect a password from stdin without interaction.
+        
+        if [[ -z "$user_pw" ]]; then
+            # User ID of the logged in user
+            user_id=$(/usr/bin/id -u "$logged_in_user")
+            
+            # Determine appropriate launchctl option to use
+            if [[ "$os_major_ver" -eq 10 && "$os_minor_ver" -le 9 ]]; then
+                l_id=$(/usr/bin/pgrep -x -u "$user_id" loginwindow)
+                l_method="bsexec"
+            elif [[ "$os_major_ver" -ge 11 || "$os_major_ver" -eq 10 && "$os_minor_ver" -gt 9 ]]; then
+                l_id="$user_id"
+                l_method="asuser"
+            fi
+            
+            # Applescript path to macOS installer app icon
+            mas_os_icon_as="$(/usr/bin/osascript -e 'tell application "System Events" to return POSIX file "'"$mas_os_icon"'" as text')"
+            
+            # Kill Jamf Helper window temporarily to avoid hiding upcoming AppleScript dialog
+            /bin/kill -s KILL "$JHPID" > /dev/null 1>&2
+            
+            # Get the logged in user's password via a prompt.
+            echo "Prompting $logged_in_user for their Mac password..."
+            
+            user_pw="$(/bin/launchctl "$l_method" "$l_id" /usr/bin/osascript << EOF
+            return text returned of (display dialog "Please enter the password for the account \"$logged_in_user\" you use to log in to your Mac:" default answer "" with title "macOS OS Install Authentication" giving up after 86400 with text buttons {"OK"} default button 1 with hidden answer with icon file "${mas_os_icon_as}")
+EOF
+            )"
+            # Thanks to James Barclay (@futureimperfect) for this password validation loop.
+            TRY=1
+            until /usr/bin/dscl /Search -authonly "$logged_in_user" "$user_pw" &>/dev/null; do
+                (( TRY++ ))
+                echo "Prompting $logged_in_user for their Mac password (attempt $TRY)..."
+                user_pw="$(/bin/launchctl "$l_method" "$l_id" /usr/bin/osascript -e 'display dialog "Sorry, that password was incorrect. Please try again:" default answer "" with title "macOS Install Authentication" giving up after 86400 with text buttons {"OK"} default button 1 with hidden answer with icon file "'"${mas_os_icon_as//\"/\\\"}"'"' -e 'return text returned of result')"
+                if (( TRY >= 5 )); then
+                    echo "Password prompt unsuccessful after 5 attempts."
+                    "$jamfHelper" -windowType utility -icon "$alerticon" -title "Authentication Error" -description "$forgot_password" -button1 "Exit" -defaultButton 1 &
+                    exit 18
+                fi
+            done
+            echo "Successfully prompted for user password."
+        fi
+        
+        vol_owner_options="--user $logged_in_user --stdinpass <<<$user_pw"
+    fi
+    
+    # Make use install package
+    [[ -e "$add_install_pkg" ]] && installpkg_option="--installpackage $add_install_pkg"
     
     # The startosinstall tool has been updated in various forms. The commands below take advantage of those updates.
-    if [[ "$(compareLooseVersion $base_os_ver 11.0)" = True ]] && [[ ! -e "$add_install_pkg" ]]; then
+    if [[ "$(compareLooseVersion $base_os_ver 11.0)" = True ]] && [[ "$running_apple_silicon" == "1" ]]; then
+        echo "The embedded OS version in the macOS installer app is greater than or equal to macOS 11. Running appropriate startosinstall command to initiate install."
+        # Initiate the macOS Big Sur silent install
+        # 30 second delay should give the jamf binary enough time to upload policy results to JSS
+        # On Apple Silicon, the "--user" and either "--passprompt" or "--stdinpass" need to be used.
+        # An attempt was made to use --stdinpass but that resulted in the password being logged in the install log due to use of /usr/bin/script
+        # /usr/bin/script -q -t 1 "$install_log" "$mac_os_installer_path/Contents/Resources/startosinstall" --rebootdelay 30 --agreetolicense ${installpkg_option} --forcequitapps --pidtosignal "$JHPID" --user "$logged_in_user" --stdinpass <<<"$user_pw"; echo "Exit Code:$?" >> "$install_log" &
+        #
+        # Settled on using an embedded Expect script so that the password can be passed interactively using --passprompt.
+        /usr/bin/expect -d <(/bin/cat <<EOD
+        # Disable timeout
+        set timeout -1
+        
+        # Run startosinstall command via /usr/bin/script
+        spawn /usr/bin/script -q -t 1 "$install_log" "$mac_os_installer_path/Contents/Resources/startosinstall" --rebootdelay 30 --agreetolicense --forcequitapps ${installpkg_option} --pidtosignal "$JHPID" --user "$logged_in_user" --passprompt;
+        
+        # Look for "Password: " prompt
+        expect ".*Password: "
+        
+        # Send password to interactive prompt
+        send -- "$user_pw\n"
+        
+        # Allow startosinstall to finish running
+        interact
+        
+        # Wait until the spawned process finishes and capture the exit code in variable $value
+        lassign [wait] pid spawnid os_error_flag value
+        
+        # Exit with exit code value from spawned process
+        exit "$value"
+EOD
+)
+        # Capture exit code and send it to the install log
+        echo "Exit Code:$?" >> "$install_log"
+        
+        # Clear password variable
+        unset "$user_pw"
+    elif [[ "$(compareLooseVersion $base_os_ver 11.0)" = True ]] && [[ "$running_apple_silicon" == "0" ]]; then
+        echo "The embedded OS version in the macOS installer app is greater than or equal to macOS 11. Running appropriate startosinstall command to initiate install."
+        # Initiate the macOS Big Sur silent install
+        # 30 second delay should give the jamf binary enough time to upload policy results to JSS
+        /usr/bin/script -q -t 1 "$install_log" "$mac_os_installer_path/Contents/Resources/startosinstall" --rebootdelay 30 --agreetolicense ${installpkg_option} --forcequitapps --pidtosignal "$JHPID"; echo "Exit Code:$?" >> "$install_log" &
+    elif [[ "$(compareLooseVersion $base_os_ver 10.15)" = True ]]; then
         echo "The embedded OS version in the macOS installer app is greater than or equal to 10.15. Running appropriate startosinstall command to initiate install."
         # Initiate the macOS Catalina silent install
         # 30 second delay should give the jamf binary enough time to upload policy results to JSS
-        /usr/bin/script -q -t 1 "$log" "$mac_os_installer_path/Contents/Resources/startosinstall" --rebootdelay 30 --agreetolicense --forcequitapps --pidtosignal "$JHPID"; echo "Exit Code:$?" >> "$log" &
-    elif [[ "$(compareLooseVersion $base_os_ver 11.0)" = True ]] && [[ -e "$add_install_pkg" ]]; then
-        echo "The embedded OS version in the macOS installer app is greater than or equal to 10.15. Running appropriate startosinstall command to initiate install with an additional install package to run post-OS install."
-        # Initiate the macOS Catalina silent install
-        # 30 second delay should give the jamf binary enough time to upload policy results to JSS
-        /usr/bin/script -q -t 1 "$log" "$mac_os_installer_path/Contents/Resources/startosinstall" --rebootdelay 30 --agreetolicense --installpackage "$add_install_pkg" --forcequitapps --pidtosignal "$JHPID"; echo "Exit Code:$?" >> "$log" &
-    elif [[ "$(compareLooseVersion $base_os_ver 10.15)" = True ]] && [[ ! -e "$add_install_pkg" ]]; then
-        echo "The embedded OS version in the macOS installer app is greater than or equal to 10.15. Running appropriate startosinstall command to initiate install."
-        # Initiate the macOS Catalina silent install
-        # 30 second delay should give the jamf binary enough time to upload policy results to JSS
-        /usr/bin/script -q -t 1 "$log" "$mac_os_installer_path/Contents/Resources/startosinstall" --rebootdelay 30 --agreetolicense --forcequitapps --pidtosignal "$JHPID"; echo "Exit Code:$?" >> "$log" &
-    elif [[ "$(compareLooseVersion $base_os_ver 10.15)" = True ]] && [[ -e "$add_install_pkg" ]]; then
-        echo "The embedded OS version in the macOS installer app is greater than or equal to 10.15. Running appropriate startosinstall command to initiate install with an additional install package to run post-OS install."
-        # Initiate the macOS Catalina silent install
-        # 30 second delay should give the jamf binary enough time to upload policy results to JSS
-        /usr/bin/script -q -t 1 "$log" "$mac_os_installer_path/Contents/Resources/startosinstall" --rebootdelay 30 --agreetolicense --installpackage "$add_install_pkg" --forcequitapps --pidtosignal "$JHPID"; echo "Exit Code:$?" >> "$log" &
-    elif [[ "$(compareLooseVersion $base_os_ver 10.14)" = True ]] && [[ ! -e "$add_install_pkg" ]]; then
+        /usr/bin/script -q -t 1 "$install_log" "$mac_os_installer_path/Contents/Resources/startosinstall" --rebootdelay 30 --agreetolicense ${installpkg_option} --forcequitapps --pidtosignal "$JHPID"; echo "Exit Code:$?" >> "$install_log" &
+    elif [[ "$(compareLooseVersion $base_os_ver 10.14)" = True ]]; then
         echo "The embedded OS version in the macOS installer app is greater than or equal to 10.14. Running appropriate startosinstall command to initiate install."
         # Initiate the macOS Mojave silent install
         # 30 second delay should give the jamf binary enough time to upload policy results to JSS
-        /usr/bin/script -q -t 1 "$log" "$mac_os_installer_path/Contents/Resources/startosinstall" --rebootdelay 30 --agreetolicense --pidtosignal "$JHPID"; echo "Exit Code:$?" >> "$log" &
-    elif [[ "$(compareLooseVersion $base_os_ver 10.14)" = True ]] && [[ -e "$add_install_pkg" ]]; then
-        echo "The embedded OS version in the macOS installer app is greater than or equal to 10.14. Running appropriate startosinstall command to initiate install with an additional install package to run post-OS install."
-        # Initiate the macOS Mojave silent install
-        # 30 second delay should give the jamf binary enough time to upload policy results to JSS
-        /usr/bin/script -q -t 1 "$log" "$mac_os_installer_path/Contents/Resources/startosinstall" --rebootdelay 30 --agreetolicense --installpackage "$add_install_pkg" --pidtosignal "$JHPID"; echo "Exit Code:$?" >> "$log" &
-    elif [[ "$(compareLooseVersion $base_os_ver 10.13)" = True ]] && [[ ! -e "$add_install_pkg" ]]; then
+        /usr/bin/script -q -t 1 "$install_log" "$mac_os_installer_path/Contents/Resources/startosinstall" --rebootdelay 30 --agreetolicense ${installpkg_option} --pidtosignal "$JHPID"; echo "Exit Code:$?" >> "$install_log" &
+    elif [[ "$(compareLooseVersion $base_os_ver 10.13)" = True ]]; then
         echo "The embedded OS version in the macOS installer app is greater than or equal to 10.13. Running appropriate startosinstall command to initiate install."
         # Initiate the macOS High Sierra silent install
         # 30 second delay should give the jamf binary enough time to upload policy results to JSS
         # Left this the same as the previous command in case you want to force upgrades to do APFS. Modify the next line by adding: --converttoapfs YES
         # If Apple's installer does not upgrade the Mac to APFS, assume something about your Mac does not pass the "upgrade to APFS" logic.
-        /usr/bin/script -q -t 1 "$log" "$mac_os_installer_path/Contents/Resources/startosinstall" --applicationpath "$mac_os_installer_path" --rebootdelay 30 --agreetolicense --pidtosignal "$JHPID"; echo "Exit Code:$?" >> "$log" &
-    elif [[ "$(compareLooseVersion $base_os_ver 10.13)" = True ]] && [[ -e "$add_install_pkg" ]]; then
-        echo "The embedded OS version in the macOS installer app is greater than or equal to 10.13. Running appropriate startosinstall command to initiate install with an additional install package to run post-OS install."
-        # Initiate the macOS High Sierra silent install
-        # 30 second delay should give the jamf binary enough time to upload policy results to JSS
-        # Left this the same as the previous command in case you want to force upgrades to do APFS. Modify the next line by adding: --converttoapfs YES
-        # If Apple's installer does not upgrade the Mac to APFS, assume something about your Mac does not pass the "upgrade to APFS" logic.
-        /usr/bin/script -q -t 1 "$log" "$mac_os_installer_path/Contents/Resources/startosinstall" --applicationpath "$mac_os_installer_path" --rebootdelay 30 --nointeraction --installpackage "$add_install_pkg" --pidtosignal "$JHPID"; echo "Exit Code:$?" >> "$log" &
+        /usr/bin/script -q -t 1 "$install_log" "$mac_os_installer_path/Contents/Resources/startosinstall" --applicationpath "$mac_os_installer_path" --rebootdelay 30 --agreetolicense ${installpkg_option} --pidtosignal "$JHPID"; echo "Exit Code:$?" >> "$install_log" &
     elif [[ "$(compareLooseVersion $base_os_ver 10.12.4)" = True ]]; then
         echo "The OS version in the macOS installer app version is greater than 10.12.4 but lower than 10.13. Running appropriate startosinstall command to initiate install."
         # Initiate the macOS Sierra silent install (this will also work for High Sierra)
         # 30 second delay should give the jamf binary enough time to upload policy results to JSS
-        /usr/bin/script -q -t 1 "$log" "$mac_os_installer_path/Contents/Resources/startosinstall" --applicationpath "$mac_os_installer_path" --rebootdelay 30 --nointeraction --pidtosignal "$JHPID"; echo "Exit Code:$?" >> "$log" &
+        /usr/bin/script -q -t 1 "$install_log" "$mac_os_installer_path/Contents/Resources/startosinstall" --applicationpath "$mac_os_installer_path" --rebootdelay 30 --nointeraction --pidtosignal "$JHPID"; echo "Exit Code:$?" >> "$install_log" &
     elif [[ "$(compareLooseVersion $base_os_ver 10.12)" = True ]]; then
         echo "The OS version in the macOS installer app version is less than 10.12.4. Running appropriate startosinstall command to initiate install."
         # Initiate the macOS Seirra silent install
         # 30 second delay should give the jamf binary enough time to upload policy results to JSS
-        /usr/bin/script -q -t 1 "$log" "$mac_os_installer_path/Contents/Resources/startosinstall" --applicationpath "$mac_os_installer_path"  --volume / --rebootdelay 30 --nointeraction --pidtosignal "$JHPID"; echo "Exit Code:$?" >> "$log" &
+        /usr/bin/script -q -t 1 "$install_log" "$mac_os_installer_path/Contents/Resources/startosinstall" --applicationpath "$mac_os_installer_path"  --volume / --rebootdelay 30 --nointeraction --pidtosignal "$JHPID"; echo "Exit Code:$?" >> "$install_log" &
     else
         echo "The OS version in the macOS installer app version is less than 10.12. Running appropriate startosinstall command to initiate install."
     fi
@@ -870,33 +937,41 @@ installCommand (){
 # Function that goes through the install
 # Takes parameter $1 which is optional and is simply meant to add additional text to the jamfHelper header
 installOS (){
+    heading="${1}"
+    
     # Prompt for user password for FV authenticated restart if supported to avoid installation stalling at FV login window
     fvAuthRestart
     
+    # Check for volume owners which is relevant for Macs running on Apple Silicon
+    confirmVolumeOwner
+    
+    # Capture return on confirmVolumeOwner
+    running_apple_silicon="$(echo $?)"
+    
     # Update message letting end-user know upgrade is going to start.
-    "$jamfHelper" -windowType hud -lockhud -title "$app_name$1" -description "$inprogress" -icon "$mas_os_icon" &
+    "$jamfHelper" -windowType hud -lockhud -title "$app_name$heading" -description "$inprogress" -icon "$mas_os_icon" -windowPosition  &
     
     # Get the Process ID of the last command
     JHPID=$(echo "$!")
     
     # Generate log name
-    log="${installmacos_log}_$(/bin/date +%y%m%d%H%M%S)".log
+    install_log="${installmacos_log}_$(/bin/date +%y%m%d%H%M%S)".log
     
     # Run the os installer command
-    installCommand "$JHPID" "$log"
+    installCommand "$JHPID" "$install_log" "$running_apple_silicon"
     
     # The macOS install process successfully exits with code 0
-    # On the off chance, the installer fails, let's warn the user
-    if [[ "$(/usr/bin/tail -n 1 $log | /usr/bin/cut -d : -f 2)" != 0 ]] && [[ "$(/usr/bin/tail -n 1 $log | /usr/bin/cut -d : -f 2)" != 255 ]]; then
+    # On the off chance the installer fails, let's warn the user
+    if [[ "$(/usr/bin/tail -n 1 $install_log | /usr/bin/cut -d : -f 2)" != 0 ]] && [[ "$(/usr/bin/tail -n 1 $install_log | /usr/bin/cut -d : -f 2)" != 255 ]]; then
         /bin/kill -s KILL "$JHPID" > /dev/null 1>&2
-        echo "startosinstall did not succeed. See log at: $log and /var/log/install.log and /var/log/system.log"
+        echo "startosinstall did not succeed. See log at: $install_log and /var/log/install.log and /var/log/system.log"
         "$jamfHelper" -windowType utility -icon "$alerticon" -title "Installation Failure" -description "$upgrade_error" -button1 "Exit" -defaultButton 1 &
         exit 9
     fi
     
-    if [[ "$(/usr/bin/tail -n 2 $log | /usr/bin/head -n 1)" = "An error occurred installing macOS." ]] || [[ "$(/usr/bin/tail -n 2 $log | /usr/bin/head -n 1)" = "Helper tool crashed..." ]]; then
+    if [[ "$(/usr/bin/tail -n 2 $install_log | /usr/bin/head -n 1)" = "An error occurred installing macOS." ]] || [[ "$(/usr/bin/tail -n 2 $install_log | /usr/bin/head -n 1)" = "Helper tool crashed..." ]]; then
         /bin/kill -s KILL "$JHPID" > /dev/null 1>&2
-        echo "startosinstall did not succeed. See log at: $log and /var/log/install.log and /var/log/system.log"
+        echo "startosinstall did not succeed. See log at: $install_log and /var/log/install.log and /var/log/system.log"
         "$jamfHelper" -windowType utility -icon "$alerticon" -title "Installation Failure" -description "$upgrade_error" -button1 "Exit" -defaultButton 1 &
         exit 9
     fi
@@ -986,12 +1061,12 @@ createReconAfterUpgradeLaunchDaemon (){
 	<array>
 		<string>/bin/zsh</string>
 		<string>-c</string>
-		<string>/usr/local/bin/jamf recon &amp;&amp; /bin/rm -f /Library/LaunchDaemons/$launch_daemon.plist; /bin/launchctl bootout system/$launch_daemon;</string>
+		<string>/usr/local/bin/jamf recon &amp;&amp; /bin/rm -f /Library/LaunchDaemons/$launch_daemon.plist &amp;&amp; /bin/launchctl bootout system/$launch_daemon;</string>
 	</array>
 	<key>RunAtLoad</key>
-		<true/>
+	<true/>
 	<key>StartInterval</key>
-		<integer>60</integer>
+	<integer>60</integer>
 </dict>
 </plist>" > "$launch_daemon_path"
     
@@ -1006,14 +1081,47 @@ determineBaseOSVersion (){
     # This needs to be re-worked because of chances in the macOS 11 installer
     # Determine version of the OS included in the installer
     if [[ "$installer_app_major_ver" -ge 16 ]]; then
+        # Variable to determine mount failure status
+        mount_failure="false"
+        
         # Mount volume
         /usr/bin/hdiutil attach -nobrowse -quiet "$mac_os_installer_path"/Contents/SharedSupport/SharedSupport.dmg
+        
+        # Determine whether SharedSupport.dmg was mounted
+        if [[ $? -ne 0 ]]; then
+            mount_failure="true"
+            
+            # Attempt a re-download of the OS installer
+            redownloadOSInstaller
+            
+            # Attempt to mount volume one more time
+            /usr/bin/hdiutil attach -nobrowse -quiet "$mac_os_installer_path"/Contents/SharedSupport/SharedSupport.dmg
+            
+            # Determine whether SharedSupport.dmg was mounted
+            if [[ $? -ne 0 ]]; then
+                mount_failure="true"
+            else
+                mount_failure="false"
+            fi
+        fi
+        
+        if [[ "$mount_failure" == "true" ]]; then
+            echo "Failed to mount SharedSupport.dmg"
+            "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+            exit 28
+        fi
         
         # Path to mobile asset xml which contains path to zip containing base OS image
         mobile_asset_xml="/Volumes/Shared Support/com_apple_MobileAsset_MacSoftwareUpdate/com_apple_MobileAsset_MacSoftwareUpdate.xml"
         
         # Relative path to mobile asset
         mobile_asset="$(/usr/libexec/PlistBuddy -c "print :Assets:0:__RelativePath" "$mobile_asset_xml" 2>/dev/null)"
+        
+        if [[ $? -ne 0 ]]; then
+            echo "Could not read mobile asset xml from SharedSupport.dmg."
+            "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+            exit 29
+        fi
         
         # Confirm that value returned by plistbuddy is valid
         checkForPlistValue "$mobile_asset"
@@ -1037,6 +1145,20 @@ determineBaseOSVersion (){
         
         # Determine base OS image version
         base_os_ver="$(/usr/libexec/PlistBuddy -c "print :MobileAssetProperties:OSVersion" /dev/stdin <<<"$base_image_info_plist" 2>/dev/null)"
+        
+        # Confirm that a value could be retrieved from plist
+        if [[ $? -ne 0 ]]; then
+            echo "Could not read the OS version from Info.plist within the base image zip: $base_image_zip."
+            "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+            exit 30
+        fi
+        
+        # Confirm that a value containing a valid version could be retrieved from plist
+        if [[ ! "$base_os_ver" =~ ^[0-9]+[\.]{1}[0-9]+[\.]{0,1}[0-9]*$ ]]; then
+            echo "Invalid version value retrieved from Info.plist within the base image zip: $base_image_zip."
+            "$jamfHelper" -windowType utility -icon "$alerticon" -title "Error" -description "$generic_error" -button1 "Exit" -defaultButton 1 &
+            exit 31
+        fi
         
         # Confirm that value returned by plistbuddy is valid
         checkForPlistValue "$base_os_ver"
@@ -1083,6 +1205,72 @@ determineBaseOSVersion (){
     fi
     
     echo "$base_os_ver"
+}
+
+confirmVolumeOwner (){
+    logged_in_user_uuid="$(/usr/bin/dscl . read /Users/$logged_in_user GeneratedUID 2>/dev/null | /usr/bin/awk '{print $2}')"
+    
+    # Variable to determine architecture of Mac
+    platform=$(/usr/bin/arch)
+    
+    # Variable to hold state on whether to proceed with install 0=no, 1=yes
+    running_apple_silicon="0"
+    
+    # Exit if not running on Apple Silicon
+    # Otherwise confirm that logged in user is volume owner
+    if [[ "$platform" != "arm64" ]]; then
+        echo "Architecture: $platform. No need to check for volume owners.</result>"
+    else
+        # Determine number of APFS users
+        total_apfs_users=$(/usr/sbin/diskutil apfs listUsers / | /usr/bin/awk '/\+\-\-/ {print $2}' | /usr/bin/wc -l | /usr/bin/tr -d ' ')
+        
+        # Get APFS User information in plist format
+        apfs_users_plist=$(/usr/sbin/diskutil apfs listUsers / -plist)
+        
+        # Loop through all APFS Crypto Users to determine if logged in user is  volume owner
+        for (( n=0; n<$total_apfs_users; n++ )); do
+            # Determine APFS Crypto User UUID
+            apfs_crypto_user_uuid=$(/usr/libexec/PlistBuddy -c "print :Users:"$n":APFSCryptoUserUUID" /dev/stdin <<<$apfs_users_plist)
+            
+            # Determine APFS Crypto User Type
+            apfs_crypto_user_type=$(/usr/libexec/PlistBuddy -c "print :Users:"$n":APFSCryptoUserType" /dev/stdin <<<$apfs_users_plist)
+            
+            # Determine if APFS Crypto User is MDM Recovery/Bootstrap Token Key
+            if [[ "$apfs_crypto_user_type" == "MDMRecovery" ]]; then
+                echo "$apfs_crypto_user_uuid is the MDM Bootstrap Token External Key crypto user."
+                # Maybe in the future, it may be useful to check against this crypto user type
+            fi
+            
+            # Compare logged in user's uuid from list of APFS Crypto Users
+            if [[ "$logged_in_user_uuid" == "$apfs_crypto_user_uuid" ]]; then
+                # Determine volume owner status for APFS Crypto User
+                user_volume_owner_status=$(/usr/libexec/PlistBuddy -c "print :Users:"$n":VolumeOwner" /dev/stdin <<<$apfs_users_plist)
+                
+                if [[ "$user_volume_owner_status" = true ]]; then
+                    echo "Logged In User: $logged_in_user is a volumer owner."
+                    running_apple_silicon="1"
+                    break
+                else
+                    echo "Logged In User: $logged_in_user is not a volumer owner."
+                    continue
+                fi
+                
+                break
+            else
+                echo "no match"
+                continue
+            fi
+        done
+        
+        if [[ "$running_apple_silicon" -eq "1" ]]; then
+            echo "proceed with install"
+        else
+            echo "this install cannot take place. user is not a volume owner."
+        fi
+    fi
+    
+    echo "$running_apple_silicon"
+    return "$running_apple_silicon"
 }
 
 # Run through a few pre-download checks
@@ -1147,6 +1335,7 @@ fi
 min_req_os_maj="$(echo "$min_req_os" | /usr/bin/cut -d . -f 1)"
 min_req_os_min="$(echo "$min_req_os" | /usr/bin/cut -d . -f 2)"
 min_req_os_patch="$(echo "$min_req_os" | /usr/bin/cut -d . -f 3)"
+[[ -z "$min_req_os_patch" ]] && min_req_os_patch="0"
 required_space="$(/usr/bin/du -hsg "$mac_os_installer_path/Contents/SharedSupport" | /usr/bin/awk '{print $1}')"
 needed_free_space="$(($required_space * 4))"
 
@@ -1159,7 +1348,16 @@ checkForMountedInstallESD "/Volumes/OS X Install ESD"
 validatePostInstallPKG
 # quitAllApps
 
-meetsApprovedMinimumOSInstallerVersion
+
+if [[ -n "$approved_min_os_app_ver" ]]; then
+    echo "Minimum OS app version has been supplied. Performing check."
+    
+    # Determine the OS version included in the OS installer app
+    determineBaseOSVersion
+    
+    # Ensure the OS version included in the OS installer app is higher than the approved minimum OS version
+    meetsApprovedMinimumOSInstallerVersion
+fi
 
 installOS "$heading"
 
