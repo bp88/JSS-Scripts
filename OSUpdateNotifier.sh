@@ -362,6 +362,9 @@ OSMajorVersion="$(/usr/bin/sw_vers -productVersion | /usr/bin/cut -d '.' -f 1)"
 OSMinorVersion="$(/usr/bin/sw_vers -productVersion | /usr/bin/cut -d '.' -f 2)"
 OSPatchVersion="$(/usr/bin/sw_vers -productVersion | /usr/bin/cut -d '.' -f 3)"
 
+# Determine architecture
+ArchType="$(/usr/bin/arch)"
+
 # Path to plist containing history on previous runs of script
 DeprecationPlist="/Library/Application Support/JAMF/com.custom.deprecations.plist"
 BundleID="com.apple.macOS.softwareupdates"
@@ -464,6 +467,25 @@ setNotificationMessages
 checkForLoggedInUser(){
     if [[ -z "$LoggedInUser" ]]; then
         echo "No user logged in."
+        
+        # In macOS Big Sur, softwareupdate run from a launch daemon while no user is logged in seems to run
+        if [[ "$RestartRequired" ]] && [[ "$ArchType" != "arm64" ]] && [[ "$OSMajorVersion" -ge 11 ]]; then
+            echo "Attempting install of software updates while no user is logged in."
+            
+            # Capture value of CLI install of updates
+            SU_EC="$(updateCLI)"
+            
+            if [[ "$SU_EC" -ne 0 ]]; then
+                echo "Attempt to install software update(s) failed."
+                echo "/usr/bin/softwareupdate failed. Exit Code: $SU_EC"
+            fi
+            
+            # Refresh software update list now that updates have been installed silently in the background
+            refreshSoftwareUpdateList
+            
+            exit 0
+        fi
+        
         exit 0
     fi
 }
@@ -671,7 +693,7 @@ isBeyondPointOfNoReturn(){
             forceGUISoftwareUpdate
         else
             # Forcing user to perform minor OS update
-            forceSoftwareUpdate
+            forceGUISoftwareUpdate
         fi
         
         exit 0
@@ -882,6 +904,7 @@ checkForSoftwareUpdates(){
         refreshSoftwareUpdateList
     fi
     
+    # Variables to capture whether updates require a restart or not
     UpdatesNoRestart=$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep -i recommended | /usr/bin/grep -v -i restart | /usr/bin/cut -d , -f 1 | /usr/bin/sed -e 's/^[[:space:]]*//' | /usr/bin/sed -e 's/^Title:\ *//')
     RestartRequired=$(/bin/cat "$ListOfSoftwareUpdates" | /usr/bin/grep -i restart | /usr/bin/grep -v '\*' | /usr/bin/cut -d , -f 1 | /usr/bin/sed -e 's/^[[:space:]]*//' | /usr/bin/sed -e 's/^Title:\ *//')
     
