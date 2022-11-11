@@ -166,7 +166,9 @@ if [[ "$UpdateAction" == "major" ]]; then
 else
     addMajorText=" "
     addMajorUpgradeText="update"
-    if [[ "$OSMajorVersion" -ge 11 ]] || [[ "$OSMajorVersion" -eq 10 && "$OSMinorVersion" -ge 14 ]]; then
+    if [[ "$OSMajorVersion" -eq 13 ]]; then
+        StepsToUpgrade=" > System Settings > General > Software Update"
+    elif [[ "$OSMajorVersion" -eq 11 ]] || [[ "$OSMajorVersion" -eq 12 ]] || [[ "$OSMajorVersion" -eq 10 && "$OSMinorVersion" -ge 14 ]]; then
         #SUGuide="by clicking on the Apple menu, clicking System Preferences and clicking Software Update to install any available updates."
         StepsToUpgrade=" > System Preferences > Software Update"
     else
