@@ -88,7 +88,17 @@ logged_in_user="$(/usr/sbin/scutil <<< "show State:/Users/ConsoleUser" | /usr/bi
 # Jamf Parameters
 app_path="${4}"
 service_access="${5}" 
-permission="1" # allow. if you need to deny, use a configuration profile.
+
+# TCC Database Values
+auth_value="2" # allow. if you need to deny, use a configuration profile.
+auth_reason="2" # 2 seems to be fairly common, although other values exist.
+auth_version="1" # 1 is almost universal; I have a single "2" entry.  Maybe this replaced "prompt_count"?
+#indirect_object_identifier_type=null
+indirect_object_identifier="UNUSED"
+#indirect_object_code_identity=null     # If used, this is some BLOB, probably a signature of some sort
+flags=0                                 # Appears to be inversely relational to indirect objects
+boot_uuid="UNUSED"
+last_reminded=0
 
 # Validate parameters
 [[ -z "$app_path" || ! -e "$app_path" ]] && echo "Invalid application path." && exit 2
@@ -130,13 +140,47 @@ for svc in $svc_list; do
                 echo "No user logged in. User needs to be logged in to modify their TCC.db with $svc service. Exiting script."
                 exit 1
             fi
-            
-            /usr/bin/sqlite3 "$logged_in_user_home/Library/Application Support/com.apple.TCC/TCC.db" "INSERT or REPLACE INTO access (service,client,client_type,allowed,prompt_count,csreq,last_modified)
-            VALUES('$svc','$app_identifier','0','$permission','1',$req_hex,'$current_time')"
+
+            file="$logged_in_user_home/Library/Application Support/com.apple.TCC/TCC.db"
         else
-            /usr/bin/sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT or REPLACE INTO access (service,client,client_type,allowed,prompt_count,csreq,last_modified)
-            VALUES('$svc','$app_identifier','0','$permission','1',$req_hex,'$current_time')"
+            file="/Library/Application Support/com.apple.TCC/TCC.db"
         fi
+
+        echo "Adding TCC:${svc} for ${app_identifier}"
+
+        /usr/bin/sqlite3 "${file}" "INSERT or REPLACE INTO access (
+            service,
+            client,
+            client_type,
+            auth_value,
+            auth_reason,
+            auth_version,
+            csreq,
+            indirect_object_identifier,
+            flags,
+            last_modified,
+            boot_uuid,
+            last_reminded
+        )
+        VALUES(
+            '$svc',
+            '$app_identifier',
+            '0',
+            '$auth_value',
+            '$auth_reason',
+            '$auth_version',
+            $req_hex,
+            '$indirect_object_identifier',
+            '$flags',
+            '$current_time',
+            '$boot_uuid',
+            '$last_reminded'
+        )"
+        result=$?
+        if [[ ${result} != 0 ]]; then
+            echo "Adding TCC failed"
+        fi
+
     else
         echo "$svc is not a valid TCC service"
         exit 4
